@@ -1,0 +1,1281 @@
+================================================================================
+              DOKUMEN RANCANGAN SISTEM & SKEMA DATA (DATA DESIGN)
+                    VAULT TRACKING - PERSONAL FINANCE ENGINE
+================================================================================
+
+Dokumen ini berisi rancangan arsitektur data, mapping transaksi, layer kategori
+pengeluaran/pemasukan, mekanisme audit/rekonsiliasi (Dana Awal & Uang Hilang),
+serta algoritma rekomendasi kebiasaan berbasis waktu (100% In-House Processing,
+tanpa AI eksternal / OCR).
+
+Diadaptasi dan disempurnakan langsung dari struktur spreadsheet existing:
+- Sheet "Buku Besar Update" & "Buku Besar"
+- Sheet "Month Checkpoint" (Audit Periode Awal vs Akhir & Selisih)
+- Sheet "Preprocess" (Agregasi Penyimpanan & Jenis + Frekuensi)
+- Sheet "Draft Transaksi" (Kasus Utang/Piutang kompleks & Dana Tertahan/POV)
+- Sheet "Sheet6" (Perhitungan pecahan Koin & Dompet Fisik D1/D2)
+
+================================================================================
+BAGIAN 1: PRINSIP UTAMA ARSITEKTUR DATA (CORE CONCEPT)
+================================================================================
+
+Agar kamu tidak perlu lagi pusing memikirkan "mana yang harus ditulis di kolom
+Debit, mana Kredit, mana Utang, mana Piutang, dan bagaimana kalau pindah saldo",
+sistem menggunakan konsep **Double-Entry / Leg-Based Ledger yang Disederhanakan**.
+
+Di layar aplikasi (UI), kamu cukup memilih **Card / Aksi Cepat**. Di balik layar,
+setiap transaksi dicatat dengan 3 komponen kunci:
+1. WHERE (Penyimpanan / Vault): Dari atau ke dompet mana uang bergerak?
+2. WHAT (Layer Jenis & Nature): Apakah ini Konsumsi (mengurangi kekayaan bersih),
+   Pemasukan (menambah kekayaan bersih), Mutasi/Transfer (kekayaan tetap), atau
+   Utang-Piutang?
+3. WHO (Peran / Counterparty): Untuk siapa transaksi ini? (`Isa` = diri sendiri,
+   atau pihak lain seperti `Ibrahim/Dada`, `Fernando`, `Slamet`, `DDV`, `Taspen`).
+
+Dengan memisahkan **Saldo Akun (Liquid Balance)** dan **Konsumsi Riil (Consume)**,
+aplikasi otomatis tahu:
+- Saat kamu meminjamkan uang ke teman: Saldo Bank berkurang, tapi **Bukan Konsumsi**
+  (Consume = 0), melainkan berpindah menjadi **Saldo Piutang** atas nama temanmu.
+- Saat kamu pindah dana BCA ke Cash, atau kembalian Cash jadi Koin: Saldo total
+  tetap sama, tidak terhitung sebagai pengeluaran.
+
+================================================================================
+BAGIAN 2: LAYER-LAYER JENIS PENGELUARAN & PEMASUKAN (3-TIER TAXONOMY)
+================================================================================
+
+Di spreadsheet lama, kolom `Jenis` mencampuradukkan banyak level sekaligus:
+ada sifat kebutuhan (`Primer`, `Sekunder`, `Tersier`), ada kategori (`Jajan`,
+`Transportasi`, `Hiburan`, `Sedekah`), ada sumber (`Gaji`, `Dana Awal`), dan ada
+status buku (`Utang`, `Piutang`).
+
+Supaya saat kamu klik satu Card langsung keluar grafik yang tajam, kita pecah
+menjadi **3 Layer (Dimensi)** yang saling terhubung:
+
+--------------------------------------------------------------------------------
+LAYER 1: TRANSACTION NATURE (Sifat Dasar Aliran Uang)
+--------------------------------------------------------------------------------
+Layer ini dikunci oleh sistem (System Enum) untuk menentukan rumus matematika
+pada Buku Besar dan Grafik:
+1. EXPENSE (Pengeluaran Konsumsi) -> Mengurangi Saldo Vault & terhitung di `Consume`.
+2. INCOME (Pemasukan Bersih)      -> Menambah Saldo Vault & terhitung di `Income`.
+3. TRANSFER (Pindah Sumber)       -> Mengurangi Vault A, Menambah Vault B (`Consume = 0`).
+4. RECEIVABLE_LEND (Beri Piutang) -> Uang keluar untuk dipinjamkan/talangan (`Consume = 0`).
+5. RECEIVABLE_COLLECT (Terima Bayaran Piutang) -> Uang masuk dari pelunasan teman.
+6. PAYABLE_BORROW (Pinjam Utang)  -> Uang masuk karena berutang ke orang lain.
+7. PAYABLE_REPAY (Bayar Utang)    -> Uang keluar untuk melunasi utang kita.
+8. INITIAL_FUND (Dana Awal)       -> Anchor/patokan saldo saat mulai atau checkpoint.
+9. RECONCILIATION (Penyesuaian)   -> Koreksi otomatis "Uang Hilang / Tak Tercatat"
+                                     atau "Uang Masuk Tak Terduga" saat cek fisik.
+
+--------------------------------------------------------------------------------
+LAYER 2: COMMITMENT & PRIORITY LAYER (Sifat Komitmen Pengeluaran / Pemasukan)
+--------------------------------------------------------------------------------
+Menjawab kebutuhanmu untuk memantau pengeluaran wajib bulanan vs tidak tetap vs
+jajan, sekaligus mempertahankan klasifikasi `Primer/Sekunder/Tersier` dari Excel:
+
+A. Sumbu Komitmen (Commitment Type - Untuk Budgeting Bulanan):
+   - FIXED_MANDATORY (Pengeluaran Wajib Rutin):
+     Pasti keluar tiap bulan/minggu dengan nominal terukur.
+     Contoh: Parkir kantor harian, Bensin mingguan, Kuota internet, Listrik/Kos.
+   - VARIABLE_ESSENTIAL (Pengeluaran Penting Tidak Tetap):
+     Kebutuhan penting tapi waktunya/nominalnya fluktuatif.
+     Contoh: Makan siang/sarapan harian, Servis motor/ganti oli, Obat, E-Paspor.
+   - DISCRETIONARY_JAJAN (Jajan & Gaya Hidup):
+     Pengeluaran keinginan/fleksibel yang bisa direm kalau sedang hemat.
+     Contoh: Kopi Americano/Nescafe, Sate/Hokben, Nongkrong Cafe, Warnet, Rokok.
+   - SOCIAL_CHARITY (Sosial & Sedekah):
+     Contoh: Sedekah, Sumbang buku skripsi, Traktir/hadiah.
+
+B. Sumbu Prioritas Kebutuhan (Priority Tier - Sesuai Excel):
+   - PRIMER   (Kebutuhan pokok & kewajiban utama)
+   - SEKUNDER (Penunjang produktivitas & kenyamanan)
+   - TERSIER  (Hiburan, kesenangan, jajan ekstra)
+
+   *Catatan: Setiap kategori di Layer 3 sudah punya nilai default Layer 2, jadi
+   kamu TIDAK PERLU menginput Layer 2 setiap kali transaksi! Cukup pilih Card-nya,
+   Layer 2 otomatis terisi.*
+
+--------------------------------------------------------------------------------
+LAYER 3: FUNCTIONAL CATEGORY & SUB-CATEGORY (Kategori Fungsional)
+--------------------------------------------------------------------------------
+Ini adalah label yang muncul di Card dan Grafik:
+
+[KELOMPOK PENGELUARAN]
+1. Makanan & Minuman (Food & Beverage)
+   - Makan Utama (Sarapan, Makan Siang, Makan Malam) -> Default: VARIABLE_ESSENTIAL | PRIMER
+   - Jajan & Camilan (Sate, Ayam Kulit, Minimarket)  -> Default: DISCRETIONARY_JAJAN | TERSIER
+   - Kopi & Minuman (Americano FM, Nescafe, Cafe)    -> Default: DISCRETIONARY_JAJAN | TERSIER
+2. Transportasi & Kendaraan
+   - Parkir (Parkir Kantor, Parkir Motor)            -> Default: FIXED_MANDATORY | PRIMER
+   - BBM / Bensin (Bensin Skupi)                     -> Default: FIXED_MANDATORY | PRIMER
+   - Transport Umum / Ojol (Grab, Tiket Kereta/Whoosh)-> Default: VARIABLE_ESSENTIAL | SEKUNDER
+   - Perawatan Kendaraan (Beli Oli, Servis)          -> Default: VARIABLE_ESSENTIAL | PRIMER
+3. Utilitas & Tagihan Rutin
+   - Komunikasi (Kuota IM3, Pulsa, Wifi)             -> Default: FIXED_MANDATORY | PRIMER
+4. Hiburan & Lifestyle
+   - Gaming & Hiburan (Main Warnet Paradox)          -> Default: DISCRETIONARY_JAJAN | TERSIER
+   - Rokok / Personal Habit (Sampoerna Mild)         -> Default: DISCRETIONARY_JAJAN | TERSIER
+5. Pendidikan & Administrasi
+   - Kampus / Dokumen (Wisuda, Bebas Keuangan, Paspor)-> Default: VARIABLE_ESSENTIAL | PRIMER
+6. Sosial & Amal
+   - Sedekah & Sumbangan                             -> Default: SOCIAL_CHARITY | SEKUNDER
+
+[KELOMPOK PEMASUKAN]
+1. Penghasilan Utama (Active Income)
+   - Gaji Bulanan (Gajian DDV)                       -> Rutin Bulanan
+   - Bonus / THR / Insentif                          -> Tidak Tetap
+2. Dana Keluarga / Tunjangan (Benefit & Allowance)
+   - Dana Taspen / Santunan / Penerimaan Non-Dapem   -> Khusus / Non-Rutin
+   - Pemberian Keluarga (Ongkos dari Tante/Wa Lilis) -> Tidak Tetap
+3. Pemasukan Tak Terduga (Windfall)
+   - Nemu Uang / Cashback / Refund / Selisih Plus    -> Tidak Tetap
+
+================================================================================
+BAGIAN 3: MAPPING SEMUA JENIS TRANSAKSI (TRANSACTION MAPPING)
+================================================================================
+
+Berikut adalah bagaimana seluruh skenario nyatamu dipetakan ke dalam tabel
+transaksi tanpa membingungkan input:
+
+--------------------------------------------------------------------------------
+1. PENGELUARAN & PEMASUKAN BIASA (Standard In/Out)
+--------------------------------------------------------------------------------
+- Input User : Klik Card "Parkir Kantor (Rp 12.000 - NOBU)"
+- Sistem Mencatat:
+  * `nature` = EXPENSE
+  * `source_vault_id` = BANK NOBU (`direction` = OUT / Kredit di buku bank)
+  * `party_id` = Isa (Self)
+  * `amount` = 12.000
+  * Efek: Saldo BANK NOBU -12.000 | Total Consume Bulan Ini +12.000.
+
+--------------------------------------------------------------------------------
+2. PINDAH SUMBER / MUTASI ANTAR VAULT (Bank <-> Cash <-> E-Wallet)
+--------------------------------------------------------------------------------
+Contoh: Tarik tunai BCA ke Cash, atau Topup Gopay dari BCA.
+- Input User : Pilih Card "Topup / Pindah Dana" -> Dari: BCA, Ke: GOPAY, Nominal: 50.000 (Biaya Admin: 1.000 opsional).
+- Sistem Mencatat (Satu `transaction_group_id` dengan 2 baris mutasi/legs):
+  * Baris 1: `vault_id` = BCA, `direction` = OUT, `amount` = 50.000, `nature` = TRANSFER
+  * Baris 2: `vault_id` = GOPAY, `direction` = IN, `amount` = 50.000, `nature` = TRANSFER
+  * (Jika ada admin 1.000): Baris 3 otomatis tercatat sebagai `EXPENSE` (Biaya Admin Bank) pada BCA.
+- Efek: Saldo BCA berkurang, Saldo GOPAY bertambah, Grafik Pengeluaran/Konsumsi tidak tercemar oleh angka transfer!
+
+--------------------------------------------------------------------------------
+3. KASUS KHUSUS: BAYAR PAKAI CASH, KEMBALIAN JADI KOIN (Split Change / Coin Change)
+--------------------------------------------------------------------------------
+Masalahmu: *"Kadang saat perhitungan dana dengan sumber coin aku lupa saat kapan uang cash dipakai dan kembalian menjadi coin."*
+Kita sediakan **2 Cara Solusi** di dalam desain data:
+
+CARA A - Saat Transaksi (Fitur "Kembalian Koin" di Card Pembayaran Cash):
+Misal beli bensin atau jajan Rp 18.500 pakai uang kertas Rp 20.000 dari `CASH`, kembalian Rp 1.500 berupa koin masuk ke `COIN`.
+- Input User : Harga Barang = 18.500 | Bayar dari `CASH` = 20.000 | Otomatis selisih 1.500 ditanya: *"Kembalian Rp 1.500 masuk ke COIN?"* (1-Click Ya).
+- Sistem Mencatat:
+  1. Pengeluaran (`EXPENSE`) dari `CASH` sebesar Rp 18.500.
+  2. Pindah Sumber (`TRANSFER`) dari `CASH` ke `COIN` sebesar Rp 1.500.
+  *(Hasilnya: `CASH` kertas berkurang pas Rp 20.000, `COIN` bertambah Rp 1.500, pengeluaran tercatat akurat Rp 18.500).*
+
+CARA B - Saat Lupa & Baru Sadar Waktu Cek Fisik (Fitur "Coin Sweep / Konversi Cash-Koin"):
+Kalau selama seminggu kamu malas mencatat kembalian koin satu per satu (semua pengeluaran langsung potong `CASH`), lalu di akhir minggu kamu hitung celengan koin (misal di Sheet 8: pecahan 1000x22, 500x30, 200x9, 100x20 = Rp 40.800):
+- Saat kamu input hasil hitung fisik `CASH` (ternyata kurang Rp 15.000 dari buku) dan `COIN` (ternyata lebih Rp 15.000 dari buku), sistem mendeteksi **Cross-Vault Offset** antara Cash & Coin dan menawarkan tombol:
+  *"Terdeteksi koin bertambah Rp 15.000 dan uang kertas berkurang Rp 15.000. Catat sebagai Konversi Kembalian Cash -> Koin?"*
+- Dengan 1 klik, sistem membuat jurnal `TRANSFER` dari `CASH` ke `COIN` tanpa dianggap sebagai "Uang Hilang"!
+
+--------------------------------------------------------------------------------
+4. UTANG & PIUTANG OTOMATIS (Tanpa Pusing Debit/Kredit Manual)
+--------------------------------------------------------------------------------
+Di aplikasi, kamu tidak perlu lagi memilih "Debit/Kredit + Peran + Jenis Piutang".
+Cukup pilih **4 Aksi Bahasa Manusia** (atau klik Card Orang seperti `Ibrahim/Dada`, `Fernando`, `Slamet`):
+
+A. Skenario 1: "Kasih Pinjam / Talangi Teman" (Contoh: *Nando nitip Kopi FM 22.500* atau *Dada pinjam 1.500.000*)
+   - Input: Pilih Orang (`Fernando`), Dompet (`BANK NOBU`), Nominal (`22.500`).
+   - Sistem Otomatis Mengisi:
+     * Vault `BANK NOBU`: Uang Keluar (-22.500)
+     * Buku Piutang `Fernando`: Saldo Piutang Bertambah (+22.500)
+     * Konsumsi Pribadi (`Consume`): Rp 0.
+
+B. Skenario 2: "Beli Bareng / Nitip Sekalian Punya Sendiri" (Split Bill / Talangan)
+   Contoh: Kamu beli Kopi sendiri 19.500 + Nando nitip 22.500 (Total bayar sekali gesek QRIS NOBU Rp 42.000).
+   - Input di 1 layar: Total Bayar 42.000 -> Punya Isa (Jajan: 19.500) + Talangan Fernando (Piutang: 22.500).
+   - Sistem otomatis memecah menjadi 2 baris di Buku Besar (1 Expense Isa, 1 Piutang Fernando).
+
+C. Skenario 3: "Teman Bayar Utang ke Aku" (Contoh: *Amet bayar utang ayam kulit 35.000 ke BCA*)
+   - Input: Pilih Orang (`Slamet`), Klik "Bayar ke Aku", Masuk ke (`BANK BCA`), Nominal (`35.000`).
+   - Sistem Otomatis Mengisi:
+     * Vault `BANK BCA`: Uang Masuk (+35.000)
+     * Buku Piutang `Slamet`: Saldo Piutang Berkurang (-35.000) -> Status Lunas!
+
+D. Skenario 4: "Aku Pinjam Uang" & "Aku Bayar Utang"
+   - Kebalikan otomatis dari Piutang: Saat pinjam, Saldo Vault bertambah & Saldo Utang ke orang tersebut bertambah. Saat bayar, Saldo Vault berkurang & Saldo Utang berkurang.
+
+E. Skenario 5: "Dana Tertahan / Potong Hak Bersama" (Kasus Khusus `POV TASPEN` vs `POV ISA` di Sheet 4)
+   - Di Sheet `Draft Transaksi`, kamu punya kasus uang Taspen 9 juta yang baru cair sebagian (4.096.200), lalu dipakai Dada dengan perhitungan potong utang dan sisa dana yang masih "nyangkut/tertahan" (403.800).
+   - Dalam skema data kita, tabel `debt_ledgers` mendukung status `PENDING_DISBURSEMENT` (Dana Belum Cair / Tertahan di Pihak Ketiga) dan fitur **Offset/Potong Langsung** (pelunasan piutang tanpa uang masuk ke bank, melainkan memotong jatah pencairan pihak tersebut).
+
+--------------------------------------------------------------------------------
+5. PENGECEKAN DANA AWAL, REKONSILIASI ("UANG HILANG"), & TRANSAKSI SUSULAN (BACKDATED)
+--------------------------------------------------------------------------------
+Ini adalah salah satu fitur paling krusial yang kamu minta:
+1. *"Melihat nilai uang hilang/tidak tercatat dan uang masuk tak terduga saat cek fisik."*
+2. *"Jika aku ingat ada transaksi SEBELUM perhitungan dana awal, aku harus kurangi transaksi dana awal dan buat history transaksi yang baru kuingat itu."*
+
+Bagaimana Desain Datanya Bekerja?
+
+A. Konsep `Vault Checkpoint / Audit Session`:
+   Setiap kali kamu menghitung uang fisik/saldo asli (seperti di Sheet `Month Checkpoint` atau `Dana Awal` tanggal 17/10 atau Apr 2026), sistem membuat record di tabel `vault_checkpoints`:
+   - `system_expected_balance`: Saldo menurut hitungan buku besar aplikasi saat itu.
+   - `actual_physical_balance`: Saldo riil yang kamu hitung di Bank / Dompet / Koin.
+   - `discrepancy_amount` (Selisih) = `actual_physical_balance - system_expected_balance`.
+     * Jika Negatif (misal -25.000) -> Otomatis membuat transaksi `RECONCILIATION_OUT` ("Uang Hilang / Lupa Tercatat").
+     * Jika Positif (misal +10.000) -> Otomatis membuat transaksi `RECONCILIATION_IN` ("Uang Masuk Tak Terduga / Selisih Lebih").
+   Dengan begitu, kamu **tidak perlu bongkar buku besar manual**! Di dashboard langsung terlihat: *"Bulan ini ada Rp 25.000 uang keluar yang lupa dicatat di Cash"*.
+
+B. Mekanisme "Baru Ingat Transaksi Lama" (Retroactive / Backdated Transaction Absorption):
+   Ada **2 kondisi** ketika kamu tiba-tiba ingat sebuah transaksi lama:
+
+   * **KONDISI 1: Kamu ingat transaksi yang terjadi SEBELUM "Dana Awal" (Initial Baseline)**
+     Contoh: Tanggal 10 April kamu set `Dana Awal BANK NOBU = Rp 54.299.125`.
+     Tanggal 15 April kamu baru ingat: *"Oh, tanggal 9 April (atau tadi sebelum cek dana awal) sebenarnya ada pengeluaran Rp 50.000 yang uangnya sudah terpotong di saldo 54,29 juta itu, atau uangnya baru kepotong tapi aku ingin tercatat di history tanpa merusak saldo akhir saat ini!"*
+     - Di form input transaksi, ketika tanggal transaksi `<= tanggal_dana_awal` (atau kamu centang **"Potong dari Dana Awal / Penyesuaian Checkpoint"**):
+     - Sistem secara otomatis:
+       1. Menyisipkan transaksi yang baru kamu ingat ke Buku Besar (misal: *Beli sesuatu Rp 50.000*).
+       2. Mengupdate nilai `Dana Awal` (atau nilai Selisih Checkpoint terkait) secara proporsional (`absorb_into_checkpoint_id`), dan menyimpan log perubahan di `checkpoint_adjustments`.
+       3. **Hasilnya**: History transaksi barumu muncul di grafik pengeluaran, dan saldo akhir dompetmu hari ini tetap **100% SYNC** tanpa perlu kamu hitung ulang manual!
+
+   * **KONDISI 2: Kamu ingat transaksi yang terjadi di antara Checkpoint Lalu dan Cek Fisik Terakhir**
+     Contoh: Kemarin waktu cek fisik Cash, ada "Uang Hilang (Tak Tercatat)" Rp 38.000. Hari ini kamu baru ingat: *"Oh, Rp 38.000 itu kemarin buat beli bensin Skupi!"*
+     - Kamu cukup klik Card **"Uang Hilang Rp 38.000"** -> klik **"Saya Ingat Transaksi Ini"** -> Pilih "Beli Bensin Skupi (Rp 30.000)".
+     - Sistem otomatis membuat transaksi "Beli Bensin Rp 30.000" pada tanggal tersebut, dan menyusutkan nilai "Uang Hilang" dari Rp 38.000 menjadi tinggal Rp 8.000!
+
+================================================================================
+BAGIAN 4: SKEMA DATABASE LENGKAP (RELATIONAL SCHEMA DESIGN)
+================================================================================
+
+Skema ini dirancang untuk database lokal (seperti SQLite / PostgreSQL) yang
+sangat cepat untuk pemrosesan in-house.
+
+--------------------------------------------------------------------------------
+TABEL 1: `vaults` (Daftar Penyimpanan / Sumber Dana)
+--------------------------------------------------------------------------------
+Menyimpan semua tempat penyimpanan uangmu (Bank, E-Wallet, Cash, Koin, Dana Tertahan).
+
+Kolom:
+- `id`                  : UUID / Integer (Primary Key)
+- `code`                : String Unique (Contoh: `BCA`, `NOBU`, `MANDIRI`, `JAGO`, `GOPAY`, `SPAY`, `DANA`, `CASH`, `COIN`, `TASPEN`)
+- `name`                : String (Contoh: "Bank BCA", "Dompet Cash", "Celengan Koin")
+- `vault_type`          : Enum (`BANK`, `EWALLET`, `PHYSICAL_CASH`, `PHYSICAL_COIN`, `RECEIVABLE_POOL`)
+- `current_balance`     : Decimal(18,2) (Cache saldo saat ini agar loading instan)
+- `require_denomination`: Boolean (True khusus untuk `COIN` atau `CASH` jika ingin hitung per pecahan koin/kertas)
+- `is_active`           : Boolean
+- `sort_order`          : Integer (Urutan tampil Card di Dashboard)
+
+--------------------------------------------------------------------------------
+TABEL 2: `parties` (Peran / Subjek Transaksi & Relasi Utang-Piutang)
+--------------------------------------------------------------------------------
+Menggantikan ketik manual kolom `Peran` di Excel (`Isa`, `Ibrahim`, `Dada`, `Fernando`, `Slamet`, `DDV`, `Taspen`, `Tante`).
+
+Kolom:
+- `id`                  : UUID / Integer (Primary Key)
+- `name`                : String (Contoh: "Isa", "Ibrahim (Dada)", "Fernando", "Slamet", "DDV")
+- `aliases`             : Text/JSON (Contoh untuk Ibrahim: `["Dada", "Sidada"]` agar pencarian mudah)
+- `party_type`          : Enum (`SELF`, `FAMILY`, `FRIEND`, `EMPLOYER`, `INSTITUTION`)
+- `net_receivable`      : Decimal(18,2) (Total piutang aktif: positif = dia utang ke Isa, negatif = Isa utang ke dia)
+- `held_fund_balance`   : Decimal(18,2) (Khusus kasus uang tertahan seperti Taspen/Dada)
+
+--------------------------------------------------------------------------------
+TABEL 3: `categories` (Master Layer Pengeluaran & Pemasukan)
+--------------------------------------------------------------------------------
+Menyimpan hierarki jenis transaksi beserta sifat otomatisnya.
+
+Kolom:
+- `id`                  : UUID / Integer (Primary Key)
+- `parent_id`           : Nullable FK -> `categories.id` (Untuk Sub-kategori)
+- `name`                : String (Contoh: "Transportasi", "Jajan", "Parkir", "Gaji")
+- `default_nature`      : Enum (`EXPENSE`, `INCOME`, `TRANSFER`, `DEBT`, `INITIAL`, `RECONCILIATION`)
+- `commitment_type`     : Enum (`FIXED_MANDATORY`, `VARIABLE_ESSENTIAL`, `DISCRETIONARY_JAJAN`, `SOCIAL_CHARITY`, `NONE`)
+- `priority_tier`       : Enum (`PRIMER`, `SEKUNDER`, `TERSIER`, `NONE`)
+- `counts_as_consume`   : Boolean (True = masuk ke rumus kolom `Consume` seperti di Excel, False = tidak dihitung konsumsi)
+- `icon_name`           : String (Ikon untuk Card UI)
+- `color_hex`           : String (Warna untuk otomatis generate Grafik saat Card diklik)
+
+--------------------------------------------------------------------------------
+TABEL 4: `action_cards` (Card Cepat & Template Kebiasaan untuk Input 1-Klik)
+--------------------------------------------------------------------------------
+Ini adalah jantung dari fitur **"Card yang bisa langsung dipakai tanpa OCR/AI"**.
+
+Kolom:
+- `id`                  : UUID / Integer (Primary Key)
+- `title`               : String (Contoh: "Parkir Kantor", "Beli Bensin Skupi", "Kopi Americano FM", "Makan Siang")
+- `card_type`           : Enum (`QUICK_EXPENSE`, `QUICK_INCOME`, `QUICK_TRANSFER`, `QUICK_DEBT`)
+- `default_vault_id`    : FK -> `vaults.id` (Contoh: Parkir Kantor otomatis pilih `BANK NOBU`, Bensin otomatis `CASH`)
+- `target_vault_id`     : Nullable FK -> `vaults.id` (Terisi jika Card adalah Transfer/Topup)
+- `default_category_id` : FK -> `categories.id`
+- `default_party_id`    : FK -> `parties.id` (Default: `Isa`)
+- `default_amount`      : Nullable Decimal(18,2) (Contoh: Parkir Kantor = `12000`, Bensin = `38000`)
+- `amount_options_json` : JSON Array (Pilihan nominal cepat di dalam Card, misal Bensin: `[30000, 38000, 50000]`)
+- `is_fixed_amount`     : Boolean (Jika True, 1x tap langsung tersimpan tanpa ketik angka!)
+- `expected_cadence`    : Enum (`DAILY`, `WEEKDAYS`, `WEEKLY`, `MONTHLY`, `OCCASIONAL`)
+- `expected_DaysOfWeek` : JSON Array (Misal: `[1,2,3,4,5]` untuk Senin-Jumat)
+- `expected_HourStart`  : Integer (0-23, misal Parkir Kantor jam pulang kerja: `16` s/d `20`)
+- `expected_HourEnd`    : Integer (0-23)
+- `usage_count`         : Integer (Total berapa kali Card ini dipakai)
+- `last_used_at`        : Timestamp
+
+--------------------------------------------------------------------------------
+TABEL 5: `transactions` (Header Buku Besar / General Ledger)
+--------------------------------------------------------------------------------
+Tabel utama pencatatan seluruh aktivitas keuangan.
+
+Kolom:
+- `id`                  : UUID / Integer (Primary Key)
+- `created_at`          : Timestamp (Sama dengan kolom `Timestamp` di Google Form/Excel, penting untuk deteksi jam kebiasaan!)
+- `transaction_date`    : Date (Tanggal kejadian transaksi, sama dengan kolom `Tanggal` di Excel)
+- `transaction_time`    : Time (Jam kejadian, default diambil dari `created_at`, bisa diedit jika input susulan)
+- `title`               : String (Nama Transaksi, misal "Parkir kantor", "Jajan sate ayam kulit")
+- `nature`              : Enum (`EXPENSE`, `INCOME`, `TRANSFER`, `RECEIVABLE_LEND`, `RECEIVABLE_COLLECT`, `PAYABLE_BORROW`, `PAYABLE_REPAY`, `INITIAL_FUND`, `RECONCILIATION`)
+- `category_id`         : FK -> `categories.id`
+- `commitment_override` : Nullable Enum (Jika transaksi kali ini sifatnya beda dari default kategori)
+- `priority_override`   : Nullable Enum (`PRIMER`, `SEKUNDER`, `TERSIER`)
+- `party_id`            : FK -> `parties.id` (Peran: `Isa`, `Ibrahim`, `Slamet`, dll)
+- `action_card_id`      : Nullable FK -> `action_cards.id` (Menandai transaksi ini dibuat dari Card mana -> memicu grafik Card & bobot algoritma rekomendasi)
+- `total_amount`        : Decimal(18,2) (Nominal utama transaksi)
+- `consume_amount`      : Decimal(18,2) (Otomatis: `-total_amount` jika EXPENSE, `0` jika Piutang/Transfer/Dana Awal/Gaji)
+- `notes`               : Text (Keterangan tambahan)
+- `attachment_path`     : Nullable String (Path file lokal jika ada Upload Bukti struk/screenshot)
+- `is_backdated`        : Boolean (True jika ini transaksi yang baru diingat belakangan)
+- `absorbed_by_checkpoint_id` : Nullable FK -> `vault_checkpoints.id` (Terisi jika transaksi ini memotong Dana Awal / mengurangi Uang Hilang pada checkpoint tertentu)
+
+--------------------------------------------------------------------------------
+TABEL 6: `transaction_legs` (Detail Aliran Masuk/Keluar per Penyimpanan)
+--------------------------------------------------------------------------------
+Mengapa dipisah dari `transactions`? Agar 1 transaksi bisa menggerakkan lebih
+dari 1 penyimpanan sekaligus (Contoh: Transfer BCA ke Cash, atau Bayar pakai
+Cash Rp 20.000 dan kembalian Rp 1.500 otomatis masuk ke Koin!).
+
+Kolom:
+- `id`                  : UUID / Integer (Primary Key)
+- `transaction_id`      : FK -> `transactions.id`
+- `vault_id`            : FK -> `vaults.id` (Penyimpanan yang terdampak)
+- `direction`           : Enum (`IN_DEBIT`, `OUT_CREDIT`)
+                          *Catatan: `IN_DEBIT` = Menambah saldo Vault (+), `OUT_CREDIT` = Mengurangi saldo Vault (-).*
+- `amount`              : Decimal(18,2) (Selalu angka positif)
+- `signed_amount`       : Decimal(18,2) (`+amount` untuk IN, `-amount` untuk OUT -> sama dengan kolom `Transaksi` di Excel)
+- `running_vault_balance`: Decimal(18,2) (Saldo penyimpanan tersebut tepat setelah transaksi ini)
+- `running_total_balance`: Decimal(18,2) (Total seluruh kekayaan tepat setelah transaksi ini -> kolom `SALDO` di Excel)
+
+--------------------------------------------------------------------------------
+TABEL 7: `debt_entries` (Sub-Buku Besar Utang, Piutang & Dana Tertahan)
+--------------------------------------------------------------------------------
+Mencatat mutasi utang-piutang per orang sehingga kamu bisa klik nama "Ibrahim/Dada"
+atau "Fernando" dan langsung melihat berapa sisa utangnya tanpa filter manual.
+
+Kolom:
+- `id`                  : UUID / Integer (Primary Key)
+- `transaction_id`      : FK -> `transactions.id`
+- `party_id`            : FK -> `parties.id` (Siapa yang berutang / memberi utang)
+- `debt_type`           : Enum (`RECEIVABLE_PIUTANG`, `PAYABLE_UTANG`, `HELD_FUND_TERTAHAN`)
+- `movement`            : Enum (`ISSUED_TIMBUL`, `SETTLED_BAYAR`, `OFFSET_POTONG`)
+- `amount`              : Decimal(18,2)
+- `parent_debt_id`      : Nullable FK -> `debt_entries.id` (Menghubungkan transaksi "Amet bayar utang ayam kulit" langsung ke transaksi awal "Amet piutang jajan ayam kulit")
+- `status`              : Enum (`OPEN_BELUM_LUNAS`, `PARTIAL_CICIL`, `SETTLED_LUNAS`)
+- `pov_context`         : Nullable String (Contoh: `POV_ISA`, `POV_TASPEN` untuk kasus dana keluarga yang kompleks)
+
+--------------------------------------------------------------------------------
+TABEL 8: `vault_checkpoints` & `coin_denominations` (Audit Dana Awal & Cek Fisik)
+--------------------------------------------------------------------------------
+Menggantikan Sheet `Month Checkpoint`, baris `Dana Awal`, dan Sheet 8 (`Koin` & `D1/D2`).
+
+Kolom `vault_checkpoints`:
+- `id`                  : UUID / Integer (Primary Key)
+- `checkpoint_date`     : Timestamp (Waktu pengecekan dana)
+- `vault_id`            : FK -> `vaults.id`
+- `checkpoint_type`     : Enum (`INITIAL_ANCHOR`, `PERIODIC_AUDIT`)
+                          *`INITIAL_ANCHOR` = Pencatatan Dana Awal pertama kali.*
+                          *`PERIODIC_AUDIT` = Pengecekan berkala untuk cari uang hilang/selisih.*
+- `original_input_amount`: Decimal(18,2) (Angka dana awal pertama kali sebelum dikurangi transaksi susulan yang baru diingat)
+- `adjusted_base_amount`: Decimal(18,2) (Angka dana awal setelah dikurangi transaksi masa lalu yang baru diingat)
+- `book_balance_at_check`: Decimal(18,2) (Saldo menurut aplikasi sebelum disinkronkan)
+- `actual_counted_amount`: Decimal(18,2) (Saldo riil hasil hitung fisik / cek mutasi bank)
+- `unaccounted_diff`    : Decimal(18,2) (`actual_counted_amount - book_balance_at_check`. Negatif = Uang Hilang/Lupa Catat, Positif = Uang Masuk Tak Tercatat)
+- `remaining_unexplained_diff`: Decimal(18,2) (Sisa uang hilang yang belum "diingat" jadi transaksi)
+- `reconciliation_tx_id`: Nullable FK -> `transactions.id` (Link ke baris penyesuaian otomatis di Buku Besar)
+- `sub_wallet_breakdown_json`: Nullable JSON (Contoh seperti di Sheet 8: `{"Dompet_D1": 550000, "Dompet_D2": 51000}`)
+
+Kolom `coin_denominations` (Detail Pecahan Koin/Uang Fisik saat Checkpoint):
+- `id`                  : UUID / Integer (Primary Key)
+- `checkpoint_id`       : FK -> `vault_checkpoints.id`
+- `denomination_value`  : Integer (Contoh: `1000`, `500`, `200`, `100` seperti di Sheet 8)
+- `quantity`            : Integer (Contoh: `22` keping, `30` keping, `9` keping, `20` keping)
+- `subtotal`            : Integer (`denomination_value * quantity`, total = `40800`)
+
+================================================================================
+BAGIAN 5: ALGORITMA REKOMENDASI TRANSAKSI IN-HOUSE (TANPA AI / 100% MATEMATIKA)
+================================================================================
+
+Kamu menginginkan saat membuka aplikasi, Card yang muncul paling atas adalah
+transaksi yang paling mungkin kamu lakukan **di jam itu, hari itu, atau siklus
+mingguan/bulanan itu** (contoh: jam pulang kerja muncul *Parkir Kantor Rp 12.000*,
+siang muncul *Makan Siang / Kopi*, seminggu sekali muncul *Isi Bensin Skupi*).
+
+Kita bisa membangun **In-House Contextual Scoring Engine** yang sangat ringan
+(berjalan dalam < 5 milidetik di perangkat lokal menggunakan SQL + rumus skor).
+
+--------------------------------------------------------------------------------
+1. TABEL PROFIL KEBIASAAN (`card_habit_stats` - Diupdate Otomatis Tiap Transaksi)
+--------------------------------------------------------------------------------
+Setiap kali sebuah `action_card` dipakai, sistem mengupdate statistik ringkas:
+- Distribusi Jam (`hour_histogram_0_23`): Seberapa sering Card ini dipakai di jam 00..23.
+- Distribusi Hari (`dow_histogram_1_7`): Seberapa sering dipakai di hari Senin(1)..Minggu(7).
+- Distribusi Tanggal (`dom_histogram_1_31`): Untuk transaksi bulanan (seperti Gajian tanggal 25/akhir bulan).
+- `avg_interval_days`: Rata-rata jeda hari antar pemakaian Card ini (Contoh: Bensin Skupi rata-rata tiap `5.5` hari, Parkir Kantor tiap `1.2` hari kerja).
+- `last_triggered_at`: Kapan terakhir kali Card ini diinput.
+
+--------------------------------------------------------------------------------
+2. RUMUS SKOR REKOMENDASI SAAT BUKA APLIKASI (REAL-TIME RANKING)
+--------------------------------------------------------------------------------
+Saat kamu membuka aplikasi pada waktu `T_now` (memiliki `Hour_now`, `DayOfWeek_now`,
+`DateOfMonth_now`, dan selisih waktu sejak terakhir dipakai `Delta_Days`):
+
+Setiap Card akan dihitung nilai **Relevance Score (0 s/d 100)**:
+
+   SCORE(Card) = (W1 * TimeOfDay_Score)
+               + (W2 * DayOfWeek_Score)
+               + (W3 * IntervalDue_Score)
+               + (W4 * RecencyFrequency_Score)
+               - Cooldown_Penalty
+
+Penjelasan komponennya:
+1. `TimeOfDay_Score` (Bobot W1 = 35%):
+   Menggunakan jendela waktu +/- 1 jam dari jam sekarang (`Hour_now - 1` s/d `Hour_now + 1`).
+   *Contoh*: Dari data Excel-mu, `Parkir kantor` diinput pada timestamp `.745`, `.748`, `.760`, `.816` (sekitar jam 17:50 - 19:30 WIB). Maka saat kamu buka app jam 18:00, `TimeOfDay_Score` untuk Card **Parkir Kantor** bernilai mendekati **1.0 (Maksimal)**! Sedangkan jam 08:00 pagi yang naik adalah Card **Sarapan / Kopi Pagi**.
+
+2. `DayOfWeek_Score` (Bobot W2 = 20%):
+   Rasio frekuensi Card tersebut pada hari ini (misal Hari Kerja Senin-Jumat vs Akhir Pekan Sabtu-Minggu).
+   *Contoh*: Di hari Minggu, Card `Parkir Kantor` otomatis turun skornya, digantikan oleh Card `Jajan Cafe / Main Warnet`.
+
+3. `IntervalDue_Score` (Bobot W3 = 30% - Detektor Siklus Mingguan/Bulanan):
+   Mendeteksi transaksi periodik yang "sudah waktunya" dilakukan lagi!
+   Rumus: `exp( - ((Delta_Days - avg_interval_days)^2) / (2 * variance) )`
+   *Contoh*: Kamu biasa **Isi Bensin Skupi** setiap 5-7 hari sekali.
+   - Hari ke-1 s/d ke-3 setelah isi bensin: Skor rendah (karena baru saja isi).
+   - Hari ke-5 s/d ke-7 setelah isi bensin: `IntervalDue_Score` melonjak tinggi! Card **Beli Bensin Skupi** langsung naik ke deretan atas rekomendasi.
+   - Begitu juga untuk **Gajian DDV** atau **Tagihan Bulanan** ketika mendekati tanggal gajian.
+
+4. `Cooldown_Penalty` (Pengaman Anti-Spam):
+   Jika sebuah Card **sudah diinput hari ini** (untuk kategori sekali sehari seperti *Parkir Kantor* atau *Makan Siang*), sistem memberikan penalti skor besar sehingga Card tersebut langsung turun/sembunyi dan memberi tempat untuk Card berikutnya yang belum diinput hari ini.
+
+================================================================================
+BAGIAN 6: MAPPING VISUALISASI INTERAKTIF (KLIK CARD -> LANGSUNG MUNCUL GRAFIK)
+================================================================================
+
+Sesuai permintaanmu: *"Saat aku klik sebuah card atau pilihan, maka otomatis akan terlihat grafiknya."*
+Karena setiap entitas memiliki relasi langsung ke `transactions` dan `transaction_legs`,
+berikut adalah perilaku otomatis grafik berdasarkan apa yang kamu klik:
+
+1. KLIK CARD TRANSAKSI / KEBIASAAN (Misal: Klik Card "Parkir Kantor" atau "Kopi"):
+   - Grafik 1 (Bar Chart): Tren pengeluaran item tersebut per minggu / per bulan.
+   - Grafik 2 (Stat Card): Frekuensi bulan ini (misal: *"Sudah 14x bulan ini = Rp 168.000"*) dibanding rata-rata bulan lalu.
+   - Grafik 3 (Heatmap Jam/Hari): Di hari dan jam berapa kamu paling sering mengeluarkan uang untuk card ini.
+
+2. KLIK CARD LAYER PENGELUARAN (Misal: Klik "Pengeluaran Wajib", "Tidak Tetap", atau "Jajan"):
+   - Grafik 1 (Donut/Pie Chart): Proporsi Pengeluaran Wajib vs Tidak Tetap vs Jajan terhadap Total Pemasukan (Gaji).
+   - Grafik 2 (Stacked Bar): Perbandingan komposisi Primer / Sekunder / Tersier dari bulan ke bulan.
+   - Grafik 3 (Pacing Line): Garis laju pengeluaran Jajan bulan ini vs batas wajar bulananmu.
+
+3. KLIK CARD PENYIMPANAN / VAULT (Misal: Klik "BANK NOBU", "BCA", "CASH", atau "COIN"):
+   - Grafik 1 (Area Line Chart): Riwayat naik-turun saldo (`running_vault_balance`) dari waktu ke waktu.
+   - Grafik 2 (In/Out Flow): Perbandingan uang masuk vs uang keluar di dompet tersebut + riwayat selisih/"uang hilang" dari hasil Checkpoint.
+
+4. KLIK CARD ORANG / PERAN (Misal: Klik "Ibrahim/Dada", "Fernando", "Slamet"):
+   - Grafik 1 (Timeline Ledger): Riwayat kapan dia pinjam, kapan dia cicil/bayar, dan berapa sisa saldo piutang/utang aktif saat ini.
+
+================================================================================
+BAGIAN 7: CONTOH SIMULASI DATA DARI EXCEL MU KE SKEMA BARU
+================================================================================
+
+Mari kita lihat bagaimana 4 baris rumit di Excel-mu berubah menjadi sangat bersih
+di skema baru ini:
+
+[KASUS 1] Baris Excel: `Saldo NOBU | Debit: 54.299.125,21 | Peran: Isa | Jenis: Dana Awal`
+-> Di Skema Baru:
+   - `vault_checkpoints`: Vault=`NOBU`, Type=`INITIAL_ANCHOR`, `original_input_amount`=`54299125.21`
+   - `transactions`: Nature=`INITIAL_FUND`, Consume=`0`
+   - *Jika besok kamu ingat ada transaksi Rp 100.000 sebelum Dana Awal ini*:
+     Kamu tinggal input transaksi Rp 100.000 dengan centang `Potong Dana Awal`.
+     Maka `adjusted_base_amount` di checkpoint otomatis menjadi `54.199.125,21`,
+     transaksi Rp 100.000 masuk ke grafik pengeluaran, dan saldo akhir NOBU tetap `54.299.125,21`!
+
+[KASUS 2] Baris Excel: `Parkir kantor | Kredit: 12.000 | Peran: Isa | Penyimpanan: BANK NOBU | Jenis: Transportasi`
+-> Di Skema Baru:
+   - Muncul otomatis di rekomendasi jam pulang kerja (17:00 - 19:30).
+   - 1-Klik pada Card `Parkir Kantor`:
+     * `nature` = `EXPENSE`
+     * `commitment_type` = `FIXED_MANDATORY` (Pengeluaran Wajib)
+     * `priority_tier` = `PRIMER`
+     * `category` = `Transportasi > Parkir`
+     * `consume_amount` = `-12000`
+
+[KASUS 3] Baris Excel: `Nando nitip Kopi FM | Kredit: 22.500 | Peran: Fernando | Penyimpanan: BANK NOBU | Jenis: Piutang`
+-> Di Skema Baru:
+   - Klik Card `Talangi / Piutang Teman` -> Pilih `Fernando` -> `22.500` dari `BANK NOBU`.
+   - `nature` = `RECEIVABLE_LEND`, `consume_amount` = `0`.
+   - Saldo `BANK NOBU` berkurang `22.500`, tapi Saldo Piutang `Fernando` otomatis `+22.500`.
+
+[KASUS 4] Sheet 8: `Koin (1000x22, 500x30, 200x9, 100x20 = 40.800)` & `Cash (D1: 550.000, D2: 51.000 = 601.000)`
+-> Di Skema Baru:
+   - Masuk ke menu **Cek Dana / Rekonsiliasi Fisik**:
+   - Pada Vault `CASH`, kamu input `D1 = 550.000` dan `D2 = 51.000` (Total `601.000`).
+   - Pada Vault `COIN`, kamu input jumlah keping per pecahan (Total `40.800`).
+   - Sistem langsung membandingkan dengan saldo buku besar:
+     * Menampilkan berapa uang Cash yang berubah menjadi Koin (kembalian yang lupa dicatat).
+     * Menampilkan berapa murni "Uang Hilang / Lupa Catat" atau "Uang Lebih".
+     * Menyinkronkan saldo dengan 1 klik!
+
+================================================================================
+                     AKHIR DOKUMEN RANCANGAN SKEMA DATA
+================================================================================
+
+
+
+================================================================================
+BAGIAN 8: RANCANGAN STATE MACHINE, ALUR LOGIKA (PSEUDOCODE), & DDL SQL LENGKAP
+================================================================================
+
+Bagian lanjutan ini mendetailkan bagaimana database dan algoritma bekerja secara
+teknis di balik layar (masih pada level Desain Data & Logika Sistem, sebelum
+masuk ke koding aplikasi):
+1. Skema DDL SQL Lengkap (Siap pakai untuk SQLite / PostgreSQL).
+2. Logika Matematika Backdated Transaction & Dana Awal (Agar saldo tidak rusak).
+3. Logika Matematika Rekonsiliasi Koin & Cash (D1/D2 + Keping Koin).
+4. Logika Matematika Split Bill / Nitip Beli & Dana Tertahan (Kasus Taspen/Dada).
+5. Struktur Query Analitik untuk Instant Grafik saat Card Diklik.
+
+--------------------------------------------------------------------------------
+8.1. SKEMA DDL SQL LENGKAP (RELATIONAL DATABASE BLUEPRINT)
+--------------------------------------------------------------------------------
+
+```sql
+-- 1. TABEL VAULTS (PENYIMPANAN DANA)
+CREATE TABLE vaults (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(32) NOT NULL UNIQUE,         -- 'BCA', 'NOBU', 'MANDIRI', 'JAGO', 'GOPAY', 'SPAY', 'DANA', 'CASH', 'COIN', 'TASPEN'
+    name VARCHAR(100) NOT NULL,
+    vault_type VARCHAR(32) NOT NULL,          -- 'BANK', 'EWALLET', 'PHYSICAL_CASH', 'PHYSICAL_COIN', 'HELD_POOL'
+    current_balance DECIMAL(18,2) NOT NULL DEFAULT 0,
+    has_sub_containers BOOLEAN NOT NULL DEFAULT 0, -- True untuk CASH (misal terbagi Dompet D1, D2)
+    has_denominations BOOLEAN NOT NULL DEFAULT 0,  -- True untuk COIN (hitung per keping 1000, 500, 200, 100)
+    icon_name VARCHAR(50),
+    color_hex VARCHAR(10),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT 1
+);
+
+-- 2. TABEL VAULT_SUB_CONTAINERS (DOMPET FISIK D1, D2 ATAU KANTONG BANK)
+CREATE TABLE vault_sub_containers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vault_id INTEGER NOT NULL REFERENCES vaults(id),
+    code VARCHAR(32) NOT NULL,                -- 'D1' (Dompet Utama), 'D2' (Dompet Kecil/Cadangan)
+    name VARCHAR(100) NOT NULL,
+    last_counted_balance DECIMAL(18,2) NOT NULL DEFAULT 0
+);
+
+-- 3. TABEL PARTIES (PERAN / ORANG / INSTITUSI)
+CREATE TABLE parties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(32) NOT NULL UNIQUE,         -- 'ISA', 'IBRAHIM', 'FERNANDO', 'SLAMET', 'DDV', 'TASPEN'
+    name VARCHAR(100) NOT NULL,               -- 'Isa', 'Ibrahim (Dada)', 'Fernando (Nando)', 'Slamet (Amet)'
+    party_type VARCHAR(32) NOT NULL,          -- 'SELF', 'FAMILY', 'FRIEND', 'EMPLOYER', 'INSTITUTION'
+    net_receivable_balance DECIMAL(18,2) NOT NULL DEFAULT 0, -- (+) Dia utang ke Isa, (-) Isa utang ke dia
+    held_fund_balance DECIMAL(18,2) NOT NULL DEFAULT 0,      -- Dana tertahan yang belum cair
+    is_active BOOLEAN NOT NULL DEFAULT 1
+);
+
+-- 4. TABEL CATEGORIES (3-TIER TAXONOMY LAYER)
+CREATE TABLE categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER REFERENCES categories(id),
+    code VARCHAR(50) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    default_nature VARCHAR(32) NOT NULL,      -- 'EXPENSE', 'INCOME', 'TRANSFER', 'DEBT', 'INITIAL', 'RECONCILIATION'
+    commitment_type VARCHAR(32) NOT NULL,     -- 'FIXED_MANDATORY', 'VARIABLE_ESSENTIAL', 'DISCRETIONARY_JAJAN', 'SOCIAL_CHARITY', 'NONE'
+    priority_tier VARCHAR(32) NOT NULL,       -- 'PRIMER', 'SEKUNDER', 'TERSIER', 'NONE'
+    counts_as_consume BOOLEAN NOT NULL DEFAULT 1,
+    icon_name VARCHAR(50),
+    color_hex VARCHAR(10)
+);
+
+-- 5. TABEL ACTION_CARDS (KARTU INPUT CEPAT TANPA KETIK MANUAL)
+CREATE TABLE action_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title VARCHAR(100) NOT NULL,              -- 'Parkir Kantor', 'Beli Bensin Skupi', 'Kopi Americano FM'
+    subtitle VARCHAR(100),                    -- 'Rp 12.000 • BANK NOBU'
+    card_action_type VARCHAR(32) NOT NULL,    -- 'EXPENSE', 'INCOME', 'TRANSFER', 'LEND', 'COLLECT', 'SPLIT_CHANGE'
+    default_vault_id INTEGER REFERENCES vaults(id),
+    target_vault_id INTEGER REFERENCES vaults(id),
+    default_category_id INTEGER REFERENCES categories(id),
+    default_party_id INTEGER REFERENCES parties(id),
+    default_amount DECIMAL(18,2),             -- 12000 untuk Parkir Kantor
+    quick_amounts_json TEXT,                  -- '[12000, 15000]' atau '[30000, 38000, 50000]'
+    one_tap_submit BOOLEAN NOT NULL DEFAULT 0,-- Jika 1, klik langsung simpan (dengan tombol Undo 5 detik)
+    expected_cadence VARCHAR(32),             -- 'DAILY_WORKDAY', 'DAILY_ANY', 'WEEKLY', 'MONTHLY', 'ON_DEMAND'
+    pin_priority INTEGER NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT 1
+);
+
+-- 6. TABEL CARD_HABIT_STATS (ENGINE REKOMENDASI IN-HOUSE)
+CREATE TABLE card_habit_stats (
+    card_id INTEGER PRIMARY KEY REFERENCES action_cards(id),
+    total_uses INTEGER NOT NULL DEFAULT 0,
+    -- Histogram Jam (24 slot disimpan sebagai JSON array [h0, h1, ..., h23])
+    hour_counts_json TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]',
+    -- Histogram Hari dalam Minggu (7 slot: [Mon, Tue, Wed, Thu, Fri, Sat, Sun])
+    dow_counts_json TEXT NOT NULL DEFAULT '[0,0,0,0,0,0,0]',
+    -- Statistik Interval Jeda Hari (untuk mendeteksi siklus mingguan/bulanan seperti Bensin/Gaji)
+    avg_interval_days REAL DEFAULT NULL,
+    std_interval_days REAL DEFAULT NULL,
+    last_used_timestamp DATETIME DEFAULT NULL,
+    last_used_date DATE DEFAULT NULL,
+    most_frequent_amount DECIMAL(18,2) DEFAULT NULL,
+    most_frequent_vault_id INTEGER REFERENCES vaults(id)
+);
+
+-- 7. TABEL VAULT_CHECKPOINTS (DANA AWAL & AUDIT CEK FISIK)
+CREATE TABLE vault_checkpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vault_id INTEGER NOT NULL REFERENCES vaults(id),
+    checkpoint_timestamp DATETIME NOT NULL,
+    checkpoint_date DATE NOT NULL,
+    period_label VARCHAR(50),                 -- 'Awal (17/10/2024)', 'Apr, 2026'
+    checkpoint_type VARCHAR(32) NOT NULL,     -- 'INITIAL_FUND' (Dana Awal), 'AUDIT_SYNC' (Cek Fisik Berkala)
+    original_counted_amount DECIMAL(18,2) NOT NULL, -- Nilai hitung fisik saat itu
+    retroactive_deduction_total DECIMAL(18,2) NOT NULL DEFAULT 0, -- Akumulasi transaksi lama yang baru diingat & dipotong dari Dana Awal ini
+    effective_anchor_amount DECIMAL(18,2) NOT NULL, -- original_counted_amount - retroactive_deduction_total
+    system_book_balance_before DECIMAL(18,2) NOT NULL DEFAULT 0,
+    raw_discrepancy_amount DECIMAL(18,2) NOT NULL DEFAULT 0,      -- Selisih saat cek fisik: (+) Uang Lebih, (-) Uang Hilang
+    resolved_discrepancy_amount DECIMAL(18,2) NOT NULL DEFAULT 0, -- Selisih yang sudah ketahuan/diingat transaksinya
+    unexplained_discrepancy_amount DECIMAL(18,2) NOT NULL DEFAULT 0, -- Sisa uang hilang/lebih murni yang belum terjelaskan
+    notes TEXT
+);
+
+-- 8. TABEL CHECKPOINT_DENOMINATIONS (DETAIL KOIN & DOMPET D1/D2 SAAT CEK FISIK)
+CREATE TABLE checkpoint_denominations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    checkpoint_id INTEGER NOT NULL REFERENCES vault_checkpoints(id),
+    item_type VARCHAR(32) NOT NULL,           -- 'COIN_PIECE' (Keping Koin), 'PAPER_BILL' (Uang Kertas), 'SUB_WALLET' (D1/D2)
+    label VARCHAR(50) NOT NULL,               -- 'Koin 1000', 'Koin 500', 'Dompet D1', 'Dompet D2'
+    unit_value DECIMAL(18,2) NOT NULL,        -- 1000, 500, 200, 100, atau 1 untuk Sub-Wallet
+    quantity INTEGER NOT NULL,                -- 22, 30, 9, 20
+    subtotal DECIMAL(18,2) NOT NULL           -- unit_value * quantity
+);
+
+-- 9. TABEL TRANSACTIONS (HEADER BUKU BESAR)
+CREATE TABLE transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at DATETIME NOT NULL,             -- Waktu klik input sebenarnya
+    transaction_date DATE NOT NULL,           -- Tanggal transaksi terjadi
+    transaction_time TIME NOT NULL,           -- Jam transaksi terjadi
+    month_tag VARCHAR(20) NOT NULL,           -- 'Apr,2026' (Sama seperti kolom Month di Excel)
+    title VARCHAR(200) NOT NULL,              -- 'Parkir kantor', 'Jajan Americano Orange FM'
+    nature VARCHAR(32) NOT NULL,              -- 'EXPENSE', 'INCOME', 'TRANSFER', 'RECEIVABLE_LEND', 'RECEIVABLE_COLLECT', 'PAYABLE_BORROW', 'PAYABLE_REPAY', 'INITIAL_FUND', 'RECONCILIATION_LOST', 'RECONCILIATION_FOUND'
+    category_id INTEGER REFERENCES categories(id),
+    commitment_type VARCHAR(32) NOT NULL,     -- 'FIXED_MANDATORY', 'VARIABLE_ESSENTIAL', 'DISCRETIONARY_JAJAN', 'SOCIAL_CHARITY', 'NONE'
+    priority_tier VARCHAR(32) NOT NULL,       -- 'PRIMER', 'SEKUNDER', 'TERSIER', 'NONE'
+    party_id INTEGER NOT NULL REFERENCES parties(id), -- Default 'ISA'
+    action_card_id INTEGER REFERENCES action_cards(id),
+    gross_amount DECIMAL(18,2) NOT NULL,      -- Nilai nominal utama transaksi
+    consume_amount DECIMAL(18,2) NOT NULL,    -- Negatif (-gross_amount) jika konsumsi Isa, 0 jika Transfer/Piutang/Dana Awal
+    income_amount DECIMAL(18,2) NOT NULL,     -- Positif (+gross_amount) jika pemasukan murni Isa, 0 selain itu
+    is_backdated BOOLEAN NOT NULL DEFAULT 0,  -- 1 jika transaksi susulan yang baru diingat
+    linked_checkpoint_id INTEGER REFERENCES vault_checkpoints(id), -- Jika transaksi ini memotong Dana Awal atau menjelaskan Uang Hilang pada checkpoint tertentu
+    proof_file_path TEXT,                     -- Kolom 'Upload Bukti'
+    notes TEXT                                -- Kolom 'Keterangan'
+);
+
+-- 10. TABEL TRANSACTION_LEGS (MUTASI DEBIT/KREDIT PER PENYIMPANAN)
+CREATE TABLE transaction_legs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    vault_id INTEGER NOT NULL REFERENCES vaults(id),
+    leg_role VARCHAR(32) NOT NULL,            -- 'PRIMARY', 'TRANSFER_TARGET', 'COIN_CHANGE', 'ADMIN_FEE'
+    debit_in DECIMAL(18,2) NOT NULL DEFAULT 0,   -- Uang Masuk ke Penyimpanan (Kolom Debit di Buku Besar Update)
+    credit_out DECIMAL(18,2) NOT NULL DEFAULT 0, -- Uang Keluar dari Penyimpanan (Kolom Kredit di Buku Besar Update)
+    net_mutation DECIMAL(18,2) NOT NULL,         -- debit_in - credit_out (Kolom Transaksi di Excel)
+    running_vault_balance DECIMAL(18,2) NOT NULL,-- Saldo Penyimpanan ini setelah mutasi
+    running_total_wealth DECIMAL(18,2) NOT NULL  -- Total Saldo seluruh Penyimpanan (Kolom SALDO di Excel)
+);
+
+-- 11. TABEL DEBT_LEDGER_ENTRIES (TRACKING UTANG PIUTANG & DANA TERTAHAN)
+CREATE TABLE debt_ledger_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    party_id INTEGER NOT NULL REFERENCES parties(id),
+    entry_category VARCHAR(32) NOT NULL,      -- 'RECEIVABLE' (Piutang: Orang pinjam ke Isa), 'PAYABLE' (Utang: Isa pinjam ke orang), 'HELD_RIGHT' (Dana hak yang masih tertahan)
+    direction VARCHAR(16) NOT NULL,           -- 'INCREASE' (Utang/Piutang bertambah), 'DECREASE' (Bayar/Potong/Lunas)
+    settlement_method VARCHAR(32) NOT NULL,   -- 'CASH_OR_BANK' (Transfer/Tunai), 'OFFSET_DEDUCTION' (Potong langsung hak/dana tertahan seperti kasus Taspen Dada)
+    amount DECIMAL(18,2) NOT NULL,
+    reference_debt_id INTEGER REFERENCES debt_ledger_entries(id), -- Menunjuk ke utang mana yang sedang dibayar
+    remaining_open_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' -- 'OPEN', 'PARTIAL', 'SETTLED'
+);
+```
+
+--------------------------------------------------------------------------------
+8.2. SIMULASI MATEMATIKA: "BARU INGAT TRANSAKSI SEBELUM DANA AWAL"
+--------------------------------------------------------------------------------
+Mari kita uji dengan angka nyata bagaimana sistem menangani kasus ketika kamu
+baru ingat ada transaksi lama setelah melakukan perhitungan Dana Awal.
+
+**Kondisi Awal (Tanggal 10 April):**
+Kamu cek saldo Bank BCA dan menginput `Dana Awal` sebesar **Rp 212.770**.
+- Di `vault_checkpoints`:
+  * `original_counted_amount` = `212.770`
+  * `retroactive_deduction_total` = `0`
+  * `effective_anchor_amount` = `212.770`
+- Di `transaction_legs` (Baris #1 - Dana Awal BCA):
+  * `debit_in` = `212.770`, `credit_out` = `0`, `running_vault_balance` = `212.770`.
+
+**Kondisi Baru Ingat (Tanggal 12 April):**
+Kamu baru ingat bahwa sebelum perhitungan Dana Awal itu (atau termasuk di dalam
+periode awal itu), kamu sempat **Jajan Kopi Rp 15.000** yang belum tercatat di
+history pengeluaran, dan kamu ingin mencatatnya dengan **mengurangi transaksi
+Dana Awal** supaya:
+1. Pengeluaran Jajan Kopi Rp 15.000 tetap masuk ke grafik pengeluaranmu.
+2. Saldo akhir BCA hari ini **TIDAK BERUBAH / TIDAK RUSAK** (karena waktu kamu
+   hitung fisik Rp 212.770 itu sebenarnya sudah kondisi uang saat itu, atau kamu
+   ingin memisahkan Rp 15.000 dari angka Dana Awal).
+
+**Apa yang dilakukan Sistem secara Otomatis saat kamu klik "Simpan & Kurangi Dana Awal":**
+1. Sistem membuat transaksi baru (Baris History):
+   - `title` = `"Jajan Kopi"`, `nature` = `EXPENSE`, `credit_out` = `15.000`, `consume_amount` = `-15.000`.
+   - `is_backdated` = `True`, `linked_checkpoint_id` = `ID_Dana_Awal_BCA`.
+2. Sistem memodifikasi/mengimbangi `Dana Awal` pada `ID_Dana_Awal_BCA`:
+   - *Opsi A (Jika transaksi terjadi SEBELUM Dana Awal dan uangRp 212.770 adalah saldo SETELAH dikurangi kopi)*:
+     Maka sebelum beli kopi, Dana Awal aslinya adalah `212.770 + 15.000 = 227.770`, lalu dikurangi Kopi `15.000` = `212.770`.
+   - *Opsi B (Sesuai kalimatmu: "Aku harus kurangi transaksi dana awal dan buat history transaksi yang baru kuingat itu" — artinya dari total 212.770 yang tadinya dicatat sebagai Dana Awal, dikurangi 15.000 menjadi 197.770 + ada 15.000 yang dialokasikan/disesuaikan)*:
+     Sistem menyediakan toggle pilihan jelas di UI saat kamu centang **"Transaksi Sebelum Dana Awal"**:
+     * **Mode 1 (Pertahankan Saldo Akhir Saat Ini)**: Dana Awal disesuaikan sehingga `Dana Awal + Transaksi Baru = Saldo Fisik tetap Sync`.
+     * **Mode 2 (Kurangi Langsung Nominal Dana Awal sebesar Rp X)**: Baris `Dana Awal` dikurangi langsung dari `Rp 212.770` menjadi `Rp 197.770` (`effective_anchor_amount = original - X`), dan history transaksi baru Rp 15.000 dibuat.
+3. Seluruh `running_vault_balance` dan `running_total_wealth` di buku besar dihitung ulang secara instan dalam 1 transaksi database!
+
+--------------------------------------------------------------------------------
+8.3. SIMULASI MATEMATIKA: "UANG HILANG" SAAT AUDIT BULANAN & RESOLUSI SUSULAN
+--------------------------------------------------------------------------------
+Contoh nyata dari aktivitas `Month Checkpoint`:
+1. Menurut buku besar aplikasi, saldo `CASH` seharusnya **Rp 650.000**.
+2. Kamu buka dompet fisik dan menghitung:
+   - `Dompet D1` = Rp 550.000
+   - `Dompet D2` = Rp 51.000
+   - Total Fisik `CASH` = **Rp 601.000**.
+3. Sistem langsung mendeteksi:
+   - `raw_discrepancy_amount` = `601.000 - 650.000` = **-Rp 49.000 (Uang Hilang / Belum Tercatat)**.
+4. Sistem juga mengecek `COIN`:
+   - Sebelumnya saldo buku `COIN` = Rp 29.800.
+   - Kamu hitung keping koin (`1000x22 + 500x30 + 200x9 + 100x20`) = **Rp 40.800**.
+   - Ada kenaikan koin = **+Rp 11.000**.
+5. **Smart Reconciliation Prompt (Otomatis Muncul di Layar)**:
+   - *"Dari selisih Cash -Rp 49.000, sebanyak **Rp 11.000** terdeteksi berpindah menjadi kembalian di **COIN** (+Rp 11.000)."*
+   - *"Sisa uang Cash yang benar-benar belum tercatat (Uang Hilang) adalah **-Rp 38.000**."*
+6. Besoknya, kamu tiba-tiba ingat: *"Oh! Rp 38.000 yang hilang di Cash kemarin itu dipakai **Beli Bensin Skupi Rp 38.000**!"*
+   - Kamu klik Card **"Uang Hilang Rp 38.000"** -> Pilih Card **"Beli Bensin Skupi (Rp 38.000)"**.
+   - Sistem langsung mengubah baris `RECONCILIATION_LOST` Rp 38.000 menjadi transaksi `EXPENSE: Beli Bensin Skupi Rp 38.000` (`resolved_discrepancy_amount = 38.000`, `unexplained_discrepancy_amount = 0`).
+   - Hasilnya: Uang hilang menjadi **Rp 0**, grafik Transportasi bertambah Rp 38.000, dan saldo Cash tetap **Rp 601.000**!
+
+--------------------------------------------------------------------------------
+8.4. DAFTAR MASTER CARD AWAL (INITIAL SEED DATA DARI KEBIASAAN EXCEL-MU)
+--------------------------------------------------------------------------------
+Berdasarkan data di dalam file `Financial Management.xlsx` milikmu, berikut adalah
+Card yang akan langsung tersedia begitu aplikasi pertama kali dijalankan:
+
+[KELOMPOK HARIAN & JAM PULANG KERJA]
+1. **Parkir Kantor**
+   - Default: `Rp 12.000` | Vault: `BANK NOBU` | Layer: `Pengeluaran Wajib` (`Primer` > `Transportasi`)
+   - Jadwal Muncul Otomatis: Senin–Jumat, Pukul `16:30 – 20:00`
+2. **Parkir Motor (Luar Kantor)**
+   - Default: `Rp 2.000 / Rp 5.000 / Rp 12.000` | Vault: `BANK NOBU / CASH` | Layer: `Pengeluaran Tidak Tetap` (`Primer` > `Transportasi`)
+3. **Makan Siang / Makan Utama (Hokben, Warteg, dll)**
+   - Default: Pilihan Cepat `[15.000, 20.550, 25.000, 35.000]` | Vault: `BANK NOBU / BCA` | Layer: `Pengeluaran Tidak Tetap` (`Primer` > `Makan Utama`)
+   - Jadwal Muncul Otomatis: Setiap Hari, Pukul `11:30 – 14:00` & `18:00 – 21:00`
+4. **Sarapan Pagi**
+   - Default: Pilihan Cepat `[10.000, 15.000, 20.000]` | Vault: `CASH / NOBU` | Layer: `Pengeluaran Tidak Tetap` (`Primer` > `Makan Utama`)
+   - Jadwal Muncul Otomatis: Setiap Hari, Pukul `06:00 – 09:30`
+5. **Ngopi / Minuman (Americano FM, Nescafe, Lasegar)**
+   - Default: Pilihan Cepat `[12.700, 15.000, 19.500, 22.500]` | Vault: `BANK NOBU / BCA` | Layer: `Jajan` (`Tersier` > `Kopi & Minuman`)
+   - Jadwal Muncul Otomatis: Pukul `09:00 – 16:00`
+
+[KELOMPOK MINGGUAN & GAYA HIDUP]
+6. **Isi Bensin Skupi**
+   - Default: `Rp 38.000` (Pilihan: `[30.000, 38.000, 50.000]`) | Vault: `CASH / NOBU` | Layer: `Pengeluaran Wajib` (`Primer` > `Transportasi`)
+   - Jadwal Muncul Otomatis: Muncul otomatis setiap `4–7 hari` sejak terakhir kali isi bensin!
+7. **Beli Rokok (Sampoerna Mild)**
+   - Default: `Rp 38.500` | Vault: `BANK BCA / CASH` | Layer: `Jajan` (`Tersier` > `Personal Habit`)
+8. **Nongkrong Cafe / Jajan Malam (Sate, Ayam Kulit, Cafe)**
+   - Default: Pilihan Cepat `[35.000, 54.000, 80.000]` | Vault: `BANK NOBU` | Layer: `Jajan` (`Tersier` > `Jajan & Camilan`)
+   - Jadwal Muncul Otomatis: Malam hari & Akhir Pekan (`19:00 – 23:59`)
+9. **Main Warnet (Paradox Reg)**
+   - Default: `Rp 30.000` | Vault: `BANK NOBU` | Layer: `Jajan` (`Tersier` > `Hiburan`)
+
+[KELOMPOK BULANAN, TRANSFER & UTANG-PIUTANG]
+10. **Gajian Bulanan (DDV)**
+    - Default: `Rp 6.155.061` | Vault Masuk: `BANK NOBU` | Peran: `DDV` | Layer: `Pemasukan Utama` (`Gaji`)
+11. **Kuota Internet / Pulsa**
+    - Default: `Rp 51.000` | Vault: `BANK BCA / MANDIRI` | Layer: `Pengeluaran Wajib` (`Primer` > `Komunikasi`)
+12. **Talangi / Kasih Pinjam Teman (Nando, Amet, Dada)**
+    - Fitur: Klik nama teman -> otomatis masuk `Piutang` (Tidak mengurangi grafik konsumsi pribadi).
+13. **Terima Bayaran Utang Teman**
+    - Fitur: Menampilkan daftar piutang yang belum lunas (misal *Nando: Rp 22.500*, *Dada: Rp 1.500.000*) -> 1-klik "Lunas / Cicil".
+14. **Pindah Dana / Tarik Tunai / Topup E-Wallet**
+    - Fitur: Pilih Dari Vault -> Ke Vault (Contoh: `BCA -> GOPAY` atau `CASH -> COIN`).
+15. **Cek Fisik / Sinkronisasi Dana & Koin**
+    - Fitur: Kalkulator pecahan koin (`1000, 500, 200, 100`) & dompet (`D1, D2`) + deteksi uang hilang otomatis.
+
+================================================================================
+                     SIAP UNTUK TAHAP REVIEW DESAIN DATA
+================================================================================
+
+
+================================================================================
+BAGIAN 9: ERD (ENTITY RELATIONSHIP DIAGRAM), RUMUS BUKU BESAR, & WIREFRAME FLOW
+================================================================================
+
+Bagian ini melengkapi desain data dengan visualisasi hubungan antar tabel (ASCII
+ERD), perbandingan rumus Excel lama vs Query Database baru, serta struktur
+payload data saat kamu mengklik sebuah Card hingga memunculkan grafik.
+
+--------------------------------------------------------------------------------
+9.1. DIAGRAM RELASI ANTAR TABEL (ASCII ERD)
+--------------------------------------------------------------------------------
+
+                     +------------------------+
+                     |      categories        |
+                     |------------------------|
+                     | PK id                  |
+                     | FK parent_id (Self)    |
+                     |    default_nature      |
+                     |    commitment_type     |---> Layer 2: Wajib / Tidak Tetap / Jajan
+                     |    priority_tier       |---> Layer 2: Primer / Sekunder / Tersier
+                     +-----------+------------+
+                                 | 1
+                                 |
+         +-----------------------+-----------------------+
+         | *                                             | *
++--------+---------------+                      +--------+---------------+
+|     action_cards       | 1                  * |      transactions      |
+|------------------------|----------------------+------------------------|
+| PK id                  |                      | PK id                  |
+| FK default_vault_id    |                      |    created_at          |
+| FK target_vault_id     |                      |    transaction_date    |
+| FK default_category_id |                      |    transaction_time    |
+| FK default_party_id    |                      |    nature              |---> Layer 1: Expense/Income/Transfer/Debt
+|    default_amount      |                      | FK category_id         |
+|    quick_amounts_json  |                      | FK party_id            |
++--------+---------------+                      | FK action_card_id      |
+         | 1                                    |    gross_amount        |
+         |                                      |    consume_amount      |---> Otomatis (-) untuk Konsumsi, (0) untuk Piutang/Transfer
+         | 1                                    |    is_backdated        |
++--------+---------------+                      | FK linked_checkpoint_id|
+|   card_habit_stats     |                      +---+---------+--------+-+
+|------------------------|                          | 1       | 1      | *
+| PK,FK card_id          |                          |         |        |
+|    hour_counts_json    |---> Jam (00-23)          |         |        +-----------------------------+
+|    dow_counts_json     |---> Hari (Sen-Min)       | *       | *                                    | 1
+|    avg_interval_days   |---> Siklus (Mingguan)    |   +-----+------------------+         +---------+--------------+
++------------------------+                          |   |  debt_ledger_entries   |         |   vault_checkpoints    |
+                                                    |   |------------------------|         |------------------------|
++------------------------+                          |   | PK id                  |         | PK id                  |
+|        vaults          | 1                      * |   | FK transaction_id      |         | FK vault_id            |
+|------------------------|--------------------------+   | FK party_id            |         |    checkpoint_type     |
+| PK id                  |                          |   |    entry_category      |         |    original_counted    |
+|    code (BCA,NOBU,dll) |---+                      |   |    direction           |         |    retroactive_deduct  |
+|    vault_type          |   | 1                    |   |    settlement_method   |         |    effective_anchor    |
+|    current_balance     |   |                      |   | FK reference_debt_id   |         |    raw_discrepancy     |
++--------+---------------+   |                      |   |    status (OPEN/LUNAS) |         |    unexplained_discrep |
+         | 1                 |                      |   +-----------+------------+         +---------+--------------+
+         |                   | *                    |               | *                              | 1
+         | *        +--------+---------------+      |               | 1                              | *
+         |          |   transaction_legs     |------+   +-----------+------------+         +---------+--------------+
+         |          |------------------------|          |        parties         |         |checkpoint_denominations|
+         |          | PK id                  |          |------------------------|         |------------------------|
+         |          | FK transaction_id      |          | PK id                  |         | PK id                  |
+         |          | FK vault_id            |          |    code (ISA,DADA,dll) |         | FK checkpoint_id       |
+         |          |    leg_role            |          |    party_type          |         |    item_type (COIN/D1) |
+         |          |    debit_in  (+)       |          |    net_receivable_bal  |         |    unit_value (1000..) |
+         |          |    credit_out (-)      |          |    held_fund_balance   |         |    quantity            |
+         |          +------------------------+          +------------------------+         +------------------------+
+         | *
++--------+---------------+
+| vault_sub_containers   |
+|------------------------|
+| PK id                  |
+| FK vault_id            |
+|    code (D1, D2)       |
++------------------------+
+
+--------------------------------------------------------------------------------
+9.2. MAPPING RUMUS EXCEL LAMA VS LOGIKA DATABASE BARU
+--------------------------------------------------------------------------------
+
+Di file `Financial Management.xlsx`, kamu menggunakan beberapa rumus di kolom
+`K (SALDO)`, `L (Transaksi)`, `M (Month)`, `N (Consume)`, dan sheet `Preprocess`.
+Berikut adalah ekuivalennya di dalam sistem database baru:
+
+1. Kolom `L (Transaksi)` di Excel: `= D2 - E2` (Debit dikurangi Kredit)
+   -> Di Database (`transaction_legs.net_mutation`):
+      Otomatis dihitung dari `debit_in - credit_out`.
+      Kamu tidak perlu lagi mengisi 2 kolom (Debit & Kredit). Kamu cukup input
+      nominal positif `Rp 12.000`, dan karena Card-nya adalah Pengeluaran, sistem
+      otomatis menaruhnya di `credit_out = 12000` dan `net_mutation = -12000`.
+
+2. Kolom `K (SALDO)` di Excel: `= K1 + L2` (Saldo Berjalan Total Kekayaan)
+   -> Di Database (`transaction_legs.running_total_wealth` & `running_vault_balance`):
+      Di Excel, kamu hanya punya 1 kolom `SALDO` gabungan semua bank, sehingga
+      untuk tahu saldo per bank (misal `BANK NOBU` saja atau `CASH` saja) kamu
+      harus melihat sheet `Preprocess` dengan rumus `SUMIF`.
+      Di Database baru, sistem menyimpan **dua-duanya di setiap baris**:
+      - `running_vault_balance`: Saldo khusus dompet itu setelah transaksi (misal sisa saldo NOBU).
+      - `running_total_wealth`: Total seluruh kekayaan gabungan setelah transaksi.
+
+3. Kolom `N (Consume)` di Excel:
+   Di Excel kamu harus hati-hati agar `Dana Awal`, `Gaji`, dan `Piutang` bernilai `0`
+   di kolom `Consume`, sedangkan `Jajan`, `Transportasi`, `Hiburan` bernilai `-Nominal`.
+   -> Di Database (`transactions.consume_amount`):
+      Dihitung otomatis berdasarkan `nature` dan `party_id`:
+      ```
+      IF (nature == 'EXPENSE' AND party.party_type == 'SELF') THEN
+          consume_amount = -gross_amount
+      ELSE
+          consume_amount = 0
+      END IF
+      ```
+      Artinya: Piutang teman, bayar utang, pindah dana antar bank/cash/koin, gaji,
+      dan dana awal dijamin **tidak akan pernah merusak** perhitungan Konsumsi Bulanan!
+
+4. Kasus Khusus "Dana Tertahan Taspen 9 Juta & Potong Utang Dada" (Sheet `Draft Transaksi`):
+   Di Sheet 4 Excel-mu tertulis:
+   - *Uang tertahan 9.000.000 (POV Taspen)*
+   - *Cair sebagian 4.096.200 ke Bank Mandiri*
+   - *Dada ambil bagiannya & bayar utang dengan memotong dana, sisa 403.800 masih nyangkut di Taspen*
+   -> Bagaimana Skema Baru Menangani Ini Tanpa Perlu Bikin Sheet "Draft" Terpisah?
+      Di tabel `parties` dan `debt_ledger_entries`, ada fitur **Multi-POV / Held Fund**:
+      - Pihak `Taspen` dicatat memiliki `HELD_RIGHT` (Dana Hak Belum Cair) sebesar `Rp 9.000.000`.
+      - Saat cair sebagian `Rp 4.096.200` ke `BANK MANDIRI`:
+        * `BANK MANDIRI` bertambah (`+4.096.200`), dan `HELD_RIGHT Taspen` berkurang (`-4.096.200`), menyisakan `Rp 4.903.800` yang masih tertahan di Taspen.
+      - Saat `Ibrahim (Dada)` membayar utang menggunakan hak pencairan tersebut (atau ada selisih `Rp 403.800` yang nyangkut di sisa pencairan Taspen):
+        * Dicatat di `debt_ledger_entries` dengan `settlement_method = 'OFFSET_DEDUCTION'` (Potong Hak).
+        * Aplikasi langsung menampilkan kartu ringkasan di profil `Ibrahim (Dada)`:
+          - Total Utang Awal: Rp X
+          - Sudah Dipotong dari Pencairan Mandiri: Rp 2.583.200
+          - Sisa Utang yang Mengunggu Pencairan Taspen Tahap Berikutnya: **Rp 403.800**
+          *(Semua terpantau rapi tanpa perlu hitung coret-coretan manual di sheet terpisah!)*
+
+--------------------------------------------------------------------------------
+9.3. STRUKTUR WIREFRAME LAYAR & ALUR KLIK (TANPA OCR / TANPA AI)
+--------------------------------------------------------------------------------
+
+Berikut gambaran bagaimana data di atas ditampilkan menjadi antarmuka Card yang
+cepat dan otomatis menampilkan grafik saat diklik:
+
+================================================================================
+[LAYAR UTAMA / HOME DASHBOARD SAAT BUKA APP (Contoh: Senin, Jam 17:45 WIB)]
+================================================================================
+
++------------------------------------------------------------------------------+
+| TOTAL KEKAYAAN BERSIH: Rp 60.627.955,88         [Cek Fisik / Audit Dana]     |
+| Likuid (Bank+Cash+Koin): Rp 59.105.455 | Piutang Teman: Rp 1.522.500         |
++------------------------------------------------------------------------------+
+| DOMPET & PENYIMPANAN (Klik Card Dompet untuk lihat Grafik Naik-Turun Saldo)  |
+| [NOBU: 58,61 Jt] [JAGO: 576,9 Rb] [BCA: 181,5 Rb] [SPAY: 56,2 Rb] [CASH/KOIN]|
++------------------------------------------------------------------------------+
+| REKOMENDASI SAAT INI (Otomatis Urut Berdasarkan Jam 17:45 & Hari Senin)      |
+|                                                                              |
+|  +------------------------------+   +------------------------------+         |
+|  | [ICON] PARKIR KANTOR    (98%)|   | [ICON] ISI BENSIN SKUPI (87%)|         |
+|  | Rp 12.000 • BANK NOBU        |   | Rp 38.000 • CASH (6 hr lalu) |         |
+|  | [ 1-KLIK CATAT ]  [GRAFIK v] |   | [30rb] [38rb] [50rb] [GRAFIK]|         |
+|  +------------------------------+   +------------------------------+         |
+|  +------------------------------+   +------------------------------+         |
+|  | [ICON] MAKAN MALAM / SATE    |   | [ICON] TALANGI / NITIP TEMAN |         |
+|  | [20rb] [35rb] [54rb] • NOBU  |   | Nando / Amet / Dada          |         |
+|  | [ CATAT ]         [GRAFIK v] |   | [ PILIH ORANG ]   [GRAFIK v] |         |
+|  +------------------------------+   +------------------------------+         |
++------------------------------------------------------------------------------+
+| LAYER PENGELUARAN BULAN INI (Klik Layer untuk langsung buka Grafik Detail)   |
+|                                                                              |
+|  * Pengeluaran Wajib (Fixed)    : Rp 168.000  (28%)  [=========            ] |
+|  * Tidak Tetap (Variable)       : Rp 190.550  (32%)  [===========          ] |
+|  * Jajan & Gaya Hidup           : Rp 240.250  (40%)  [==============       ] |
+|  * Uang Hilang / Belum Tercatat : Rp       0   (0%)  [Aman / Terkontrol    ] |
+|  --------------------------------------------------------------------------  |
+|  * Pemasukan Bulan Ini (Gaji)   : Rp 6.155.061                               |
++------------------------------------------------------------------------------+
+
+--------------------------------------------------------------------------------
+9.4. APA YANG TERJADI SAAT TOMBOL / CARD DIKLIK (AUTO-CHART DRAWER)
+--------------------------------------------------------------------------------
+Ketika kamu mengklik salah satu Card (misal Card **"Jajan & Gaya Hidup"** atau
+Card **"Parkir Kantor"**), panel Grafik di bawahnya langsung terbuka otomatis
+menampilkan 3 visualisasi instan dari query database lokal:
+
+1. **Instant Time-Series Bar Chart**:
+   Menampilkan perbandingan pengeluaran item/layer tersebut dari minggu ke minggu
+   atau tanggal 1 s/d 30 bulan berjalan.
+2. **Instant Breakdown Donut Chart**:
+   - Jika yang diklik adalah Layer **Jajan**, donut chart otomatis memecahnya
+     menjadi: *Kopi & Minuman (Rp 47.200)*, *Sate/Makan Malam (Rp 134.000)*,
+     *Rokok (Rp 38.500)*, *Warnet (Rp 30.000)*, dan menunjukkan dari dompet mana
+     uang itu paling sering keluar (`BANK NOBU` vs `BANK BCA`).
+3. **Instant Action Drawer (Untuk Transaksi Susulan / Koreksi)**:
+   Di bawah grafik langsung ada tombol:
+   - `[+ Tambah Transaksi Sekarang]`
+   - `[+ Baru Ingat Transaksi Lama (Potong Dana Awal / Uang Hilang)]`
+
+================================================================================
+BAGIAN 10: RINGKASAN CHECKLIST KEBUTUHAN USER VS SOLUSI DESAIN DATA
+================================================================================
+
+| No | Kebutuhanmu di Prompt | Solusi di Dalam Desain Data Ini |
+|----|-----------------------|---------------------------------|
+| 1  | Card yang langsung bisa dipakai tanpa OCR / AI | Tabel `action_cards` dengan nominal cepat (`quick_amounts_json`) & tombol `1-Klik Catat`. |
+| 2  | Semua In-House Processing | Database SQL lokal + rumus matematika deterministik, 100% offline-ready tanpa API AI luar. |
+| 3  | Algoritma rekomendasi berdasarkan jam & hari kebiasaan | Tabel `card_habit_stats` (Histogram 24 jam, 7 hari, dan rata-rata interval hari untuk siklus mingguan seperti Bensin). |
+| 4  | Lihat pengeluaran wajib bulanan, tidak tetap, jajan, dan pemasukan | 3-Tier Taxonomy: Pemisahan `FIXED_MANDATORY` (Wajib), `VARIABLE_ESSENTIAL` (Tidak Tetap), `DISCRETIONARY_JAJAN` (Jajan), dan `INCOME` (Pemasukan). |
+| 5  | Pengecekan dana awal & deteksi uang "hilang" atau uang masuk tak terduga tanpa bongkar buku besar | Tabel `vault_checkpoints` yang otomatis menghitung `raw_discrepancy_amount` dan menampilkannya langsung di kartu tersendiri. |
+| 6  | Klik sebuah card/pilihan otomatis terlihat grafiknya | Setiap `action_card`, `category`, `commitment_type`, `vault`, dan `party` memiliki ID relasional langsung ke `transactions` untuk render grafik instan saat di-klik. |
+| 7  | Baru ingat transaksi sebelum Dana Awal -> kurangi Dana Awal & buat history transaksi baru | Kolom `is_backdated`, `linked_checkpoint_id`, dan `retroactive_deduction_total` yang otomatis memotong Dana Awal dan menyisipkan history tanpa merusak saldo akhir. |
+| 8  | Penulisan utang-piutang otomatis (tanpa manual tulis kredit/debit/piutang/utang/bayar) | Tabel `parties` & `debt_ledger_entries` dengan aksi bahasa manusia (*Talangi*, *Teman Bayar*, *Pinjam*, *Bayar Utang*, *Potong Dana Tertahan*). |
+| 9  | Pindah sumber dana (BCA ke Cash/Bank lain/E-Wallet) & lupa kapan Cash dipakai lalu kembalian jadi Coin | Multi-leg `transaction_legs` untuk Transfer (`Consume = 0`) + fitur **Split Kembalian Koin** saat bayar Cash & **Auto Cross-Vault Offset** saat hitung keping koin di `checkpoint_denominations`. |
+
+================================================================================
+              DOKUMEN DESAIN DATA SELESAI & LENGKAP (VERSI 1.0)
+================================================================================
+
+
+================================================================================
+BAGIAN 11: HASIL PENDALAMAN REAL-CASE (/GRILL-ME) & FITUR EKSPOR AKUNTANSI
+================================================================================
+
+Bagian ini mendokumentasikan hasil penyempurnaan desain berdasarkan skenario
+nyata (real-case) sehari-hari agar tidak ada celah saat aplikasi digunakan:
+
+--------------------------------------------------------------------------------
+11.1. PRINSIP FLUIDITAS SUMBER DANA (NO ARTIFICIAL RING-FENCING)
+--------------------------------------------------------------------------------
+- **Keputusan Desain**: Tidak ada pengkotak-kotakan uang dingin vs uang hangat
+  di dalam rekening bank. Semua penyimpanan (`BCA`, `NOBU`, `MANDIRI`, `JAGO`,
+  `CASH`, `GOPAY`, `SPAY`, `DANA`) diperlakukan **100% likuid dan siap pakai**.
+- **Alasan Real-Case**: Kamu menghindari transfer antar-bank yang tidak perlu
+  demi menghemat biaya admin. Jika transaksi cocok dibayar langsung dari sumber
+  dana tertentu tanpa biaya admin, maka transaksi langsung memotong sumber dana
+  tersebut.
+- **Implikasi ke Skema Data**:
+  * Setiap `action_card` mendukung **Multi-Vault Quick Switcher** (punya
+    `default_vault_id`, tapi di Card yang sama ada tombol pill 1-klik untuk
+    ganti ke `NOBU` / `BCA` / `CASH` sesuai bank mana yang bebas admin di
+    merchant tersebut).
+
+--------------------------------------------------------------------------------
+11.2. PAJAK / ADMIN TRANSAKSI (AUTO-SPLIT 2 BARIS) VS BUNGA BANK
+--------------------------------------------------------------------------------
+- **Keputusan Desain Pajak/Admin Transaksi**:
+  Saat kamu membeli sesuatu yang ada biaya tambahan pajak/admin/layanan (contoh:
+  *Beli Kopi di Cafe Rp 30.000* + *Pajak/Admin Rp 3.000*), di dalam Card
+  tersedia satu field opsional `+ Pajak/Admin`.
+  Begitu kamu klik Simpan, sistem **otomatis memecahnya menjadi 2 baris transaksi
+  terpisah** di Buku Besar yang terhubung oleh `parent_transaction_id`:
+  1. Baris 1: `Beli Kopi di Cafe` | Kredit: `Rp 30.000` | Kategori: `Jajan > Kopi`
+  2. Baris 2: `Admin/Pajak - Beli Kopi di Cafe` | Kredit: `Rp 3.000` | Kategori: `Biaya Admin & Pajak`
+  *Keuntungan*: Kamu cukup input 1 kali di layar, tapi di Buku Besar dan Grafik
+  tercatat sebagai 2 transaksi terpisah sehingga kamu bisa memantau berapa total
+  uang yang habis hanya untuk biaya admin/pajak setiap bulan!
+
+- **Keputusan Desain Bunga Tabungan/Deposito**:
+  Tidak perlu membuat modul input bunga bank bulanan yang rumit. Ketika kamu
+  melakukan **Checkpoint / Cek Fisik Saldo**, kenaikan saldo akibat bunga bank
+  (termasuk sen desimal seperti `.21` atau `.67`) otomatis ditangkap oleh sistem
+  sebagai `RECONCILIATION_FOUND` (**Keuntungan / Uang Masuk Tidak Tercatat saat
+  Checkpoint**).
+
+--------------------------------------------------------------------------------
+11.3. KEBIJAKAN REFUND / PEMBATALAN / DISKON (DIRECT MUTATION & RECALCULATION)
+--------------------------------------------------------------------------------
+- **Keputusan Desain**: Jika sebuah transaksi batal (di-refund) atau nominalnya
+  berubah karena diskon/koreksi, sistem **tidak perlu membuat jurnal balik yang
+  memenuhi buku besar**, melainkan mengizinkan **Hapus Langsung atau Edit
+  Nominal Transaksi Aslinya** seolah-olah transaksi tersebut tidak pernah terjadi
+  atau sudah terdiskon sejak awal.
+- **Implikasi ke Skema Data (Trigger Recalculation)**:
+  * Saat sebuah baris di `transactions` diedit nominalnya atau dihapus, prosedur
+    in-house `recalculate_running_balances(vault_id, from_date)` otomatis
+    menghitung ulang `running_vault_balance` dan `running_total_wealth` dari
+    titik tanggal tersebut ke bawah dalam hitungan milidetik.
+
+--------------------------------------------------------------------------------
+11.4. WRITE-OFF / MENGIKHLASKAN PIUTANG TEMAN (DEBT FORGIVENESS CONVERSION)
+--------------------------------------------------------------------------------
+- **Real-Case**: Teman berutang Rp 22.500 tapi hanya membayar Rp 20.000 (sisa
+  Rp 2.500 diikhlaskan), atau piutang lama yang akhirnya kamu ikhlaskan sebagai
+  sedekah/traktir.
+- **Keputusan Desain**:
+  * Pada daftar Piutang (`debt_ledger_entries`), tersedia tombol aksi
+    **"Ikhlaskan / Write-Off Sisa Piutang"**.
+  * Saat diklik, kamu bisa memilih konversi kategorinya: **`Sedekah / Sosial`**
+    atau **`Pengeluaran Tak Terduga`**.
+  * Sistem secara otomatis:
+    1. Menutup sisa saldo piutang orang tersebut menjadi `Rp 0` (`SETTLED_WRITEOFF`)
+       tanpa mengubah saldo Bank/Cash saat ini (karena uangnya memang sudah
+       keluar waktu dulu meminjamkan).
+    2. Membuat catatan konversi agar nominal yang diikhlaskan tadi **masuk ke
+       dalam Grafik Konsumsi (`consume_amount`)** pada kategori `Sedekah` atau
+       `Pengeluaran Tak Terduga`.
+
+--------------------------------------------------------------------------------
+11.5. MEKANISME PAYLATER / SUMBER DANA HUTANG (CONTOH: SHOPEE PAYLATER)
+--------------------------------------------------------------------------------
+- **Real-Case**: Kamu menggunakan PayLater (misal `Shopee PayLater`) sebagai
+  sumber pembayaran yang hakikatnya adalah berhutang ke penyedia PayLater, lalu
+  membayar tagihannya di kemudian hari.
+- **Keputusan Desain (Agar Konsumsi Tidak Terhitung Dobel)**:
+  1. `Shopee PayLater` terdaftar sebagai Vault bertipe `LIABILITY_CREDIT_LINE`
+     sekaligus terhubung ke Party `Shopee PayLater`.
+  2. **SAAT BELI BARANG PAKAI PAYLATER** (Misal: Beli Barang Rp 100.000 pakai SPayLater):
+     - Langsung dihitung sebagai **Pengeluaran Konsumsi (`consume_amount = -100.000`)**
+       pada hari pembelian itu agar grafik pengeluaranmu jujur sesuai waktu belanja.
+     - Saldo Utang ke `Shopee PayLater` bertambah `-Rp 100.000` (Kewajiban/Utang).
+  3. **SAAT BAYAR TAGIHAN PAYLATER DARI BANK** (Misal: Bulan depan bayar Rp 105.000
+     dari `BANK BCA`, di mana Rp 100.000 adalah pokok utang dan Rp 5.000 adalah
+     bunga/biaya cicilan PayLater):
+     - Sistem otomatis memecah pembayaran menjadi 2 bagian:
+       * **Pokok Tagihan (Rp 100.000)**: Dicatat sebagai `PAYABLE_REPAY` (Pelunasan
+         Utang ke Shopee PayLater). Saldo `BANK BCA` berkurang Rp 100.000, Utang
+         `Shopee PayLater` lunas (+Rp 100.000), dan **`consume_amount = 0`**
+         (agar tidak terhitung dobel di grafik pengeluaran!).
+       * **Bunga / Biaya Admin PayLater (Rp 5.000)**: Otomatis dicatat sebagai
+         baris terpisah `EXPENSE` (Kategori: `Bunga & Biaya Admin PayLater`)
+         dengan **`consume_amount = -5.000`**.
+
+--------------------------------------------------------------------------------
+11.6. FITUR "PENDING REMINDERS / DRAFT CARDS" (CATATAN SEMENTARA DI ATAS LAYAR)
+--------------------------------------------------------------------------------
+- **Real-Case**:
+  * Teman nitip beli sesuatu atau patungan makan tapi belum tahu nominal pastinya
+    ("Besok tanya Nando kopi berapa").
+  * Pengingat jadwal bayar tagihan ("Tagihan SPayLater jatuh tempo tgl 5").
+- **Keputusan Desain (Tabel `pending_reminders`)**:
+  Antrean ringan yang muncul sebagai **Banner / Pinned Card Peringatan** di
+  bagian paling atas aplikasi sampai kamu menyelesaikannya (1-klik konversi
+  menjadi transaksi Buku Besar begitu angkanya sudah pasti).
+
+```sql
+-- 12. TABEL PENDING_REMINDERS (DRAFT TRANSAKSI & PENGINGAT SEMENTARA)
+CREATE TABLE pending_reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at DATETIME NOT NULL,
+    due_date DATE,                            -- Tanggal jatuh tempo / pengingat muncul
+    reminder_type VARCHAR(32) NOT NULL,       -- 'ASK_AMOUNT' (Tanya Nominal Teman), 'PAYLATER_BILL' (Tagihan), 'DRAFT_TX' (Transaksi Belum Pasti)
+    title VARCHAR(200) NOT NULL,              -- 'Tanya Nando patungan kopi berapa', 'Bayar Tagihan SPayLater'
+    estimated_amount DECIMAL(18,2),           -- Boleh NULL jika belum tahu angkanya
+    suggested_vault_id INTEGER REFERENCES vaults(id),
+    suggested_party_id INTEGER REFERENCES parties(id),
+    suggested_category_id INTEGER REFERENCES categories(id),
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'CONVERTED_TO_TX', 'DISMISSED'
+    converted_transaction_id INTEGER REFERENCES transactions(id)
+);
+```
+
+--------------------------------------------------------------------------------
+11.7. FITUR EKSPOR "JURNAL AKUNTANSI STANDAR (DOUBLE-ENTRY)" UNTUK MANUSIA & AKUNTAN
+--------------------------------------------------------------------------------
+Sesuai permintaanmu: *"Fitur untuk mengekspor menjadi tabel transaksi mentah
+debet kredit dan keterangan yang bisa dibaca oleh mata manusia juga atau
+accountant."*
+
+Mengapa ini sangat mudah di arsitektur kita?
+Karena setiap transaksi di aplikasi kita sudah memiliki pasangan sumber dan
+tujuan yang jelas (`Vault`, `Category`, `Party/Debt`), sistem memiliki
+**Chart of Accounts (COA) Mapper** internal yang otomatis menerjemahkan setiap
+klik Card-mu menjadi **Jurnal Umum Akuntansi Standar (Double-Entry Bookkeeping)**
+yang 100% seimbang (`Total Debit == Total Kredit`)!
+
+#### A. Struktur Chart of Accounts (Kode Akun Akuntansi Otomatis)
+Setiap entitas di aplikasi otomatis memiliki `account_code` standar akuntansi:
+- **1xxx - ASET (HARTA & PIUTANG)**
+  * `1101` : Kas Tunai Dompet (`CASH` - D1/D2)
+  * `1102` : Kas Koin (`COIN`)
+  * `1111` : Bank BCA (`BANK BCA`)
+  * `1112` : Bank Nobu (`BANK NOBU`)
+  * `1113` : Bank Mandiri (`BANK MANDIRI`)
+  * `1114` : Bank Jago (`BANK JAGO`)
+  * `1121` : E-Wallet GoPay / ShopeePay / DANA
+  * `1201` : Piutang Pihak Ketiga / Teman (`Piutang - Fernando`, `Piutang - Ibrahim`, `Piutang - Slamet`)
+  * `1209` : Dana Hak Tertahan Belum Cair (`Piutang Dana Tertahan - Taspen`)
+- **2xxx - LIABILITAS (KEWAJIBAN / UTANG)**
+  * `2101` : Utang PayLater (`Utang - Shopee PayLater`)
+  * `2102` : Utang Pihak Ketiga / Keluarga (`Utang - Pihak Lain`)
+- **3xxx - EKUITAS (MODAL / DANA AWAL & PENYESUAIAN)**
+  * `3101` : Modal / Saldo Dana Awal (`Ekuitas Dana Awal`)
+  * `3201` : Koreksi Dana Awal Transaksi Susulan (`Penyesuaian Retroaktif Dana Awal`)
+- **4xxx - PENDAPATAN (INCOME)**
+  * `4101` : Pendapatan Gaji (`Gaji - DDV`)
+  * `4201` : Penerimaan Dana Keluarga / Taspen / Santunan
+  * `4901` : Pendapatan Lain-lain / Selisih Lebih Checkpoint (Termasuk Bunga Bank / Uang Masuk Tak Tercatat)
+- **5xxx - BEBAN WAJIB & POKOK (PRIMER / FIXED & VARIABLE ESSENTIAL)**
+  * `5101` : Beban Transportasi - Parkir Kantor & Motor
+  * `5102` : Beban Transportasi - BBM / Bensin
+  * `5103` : Beban Transportasi - Umum / Ojol / Tiket
+  * `5201` : Beban Konsumsi Pokok - Makan Utama (Sarapan / Siang / Malam)
+  * `5301` : Beban Komunikasi & Utilitas (Kuota / Pulsa)
+  * `5401` : Beban Pendidikan & Administrasi
+- **6xxx - BEBAN GAYA HIDUP, JAJAN, SOSIAL & ADMIN (SEKUNDER / TERSIER)**
+  * `6101` : Beban Jajan - Kopi & Minuman
+  * `6102` : Beban Jajan - Kuliner & Camilan (Sate, Cafe, dll)
+  * `6201` : Beban Hiburan & Lifestyle (Warnet, Rokok, Hobi)
+  * `6301` : Beban Sosial & Sedekah (Termasuk Piutang yang Diikhlaskan / Write-Off)
+  * `6401` : Beban Biaya Admin Bank, Pajak Transaksi & Bunga PayLater
+  * `6901` : Beban Selisih Kas / Uang Hilang Tak Tercatat (`Beban Selisih Checkpoint`)
+
+#### B. Contoh Hasil Tabel Ekspor Jurnal Akuntansi (Siap Baca Manusia & Akuntan)
+Saat kamu klik tombol **"Export Accounting Journal (.CSV / .XLSX / .TXT)"**,
+berikut adalah tampilan tabel mentah yang dihasilkan (100% ramah mata manusia
+sekaligus mematuhi standar akuntan):
+
+```text
+======================================================================================================================================================
+NO. JURNAL   TANGGAL     JAM    KODE AKUN  NAMA AKUN (COA)                     PERAN / SUB-LEDGER  DEBIT (RP)     KREDIT (RP)    KETERANGAN / NARASI
+======================================================================================================================================================
+JRN-2026-001 2026-04-17  19:36  5101       Beban Transportasi - Parkir         Isa (Self)             12.000,00           0,00  Parkir kantor [Wajib/Primer]
+JRN-2026-001 2026-04-17  19:36  1112       Bank Nobu                           Isa (Self)                  0,00      12.000,00  Keluar dari BANK NOBU
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JRN-2026-002 2026-04-18  12:01  6101       Beban Jajan - Kopi & Minuman        Isa (Self)             30.000,00           0,00  Beli kopi di cafe (Pokok)
+JRN-2026-002 2026-04-18  12:01  1112       Bank Nobu                           Isa (Self)                  0,00      30.000,00  Keluar dari BANK NOBU
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JRN-2026-003 2026-04-18  12:01  6401       Beban Admin & Pajak Transaksi       Isa (Self)              3.000,00           0,00  Admin/Pajak beli kopi cafe (Ref: JRN-2026-002)
+JRN-2026-003 2026-04-18  12:01  1112       Bank Nobu                           Isa (Self)                  0,00       3.000,00  Keluar dari BANK NOBU
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JRN-2026-004 2026-04-18  12:03  1201       Piutang Pihak Ketiga                Fernando (Nando)       22.500,00           0,00  Talangan: Nando nitip Kopi FM
+JRN-2026-004 2026-04-18  12:03  1112       Bank Nobu                           Fernando (Nando)            0,00      22.500,00  Keluar dari BANK NOBU (Non-Konsumsi)
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JRN-2026-005 2026-04-20  14:10  5102       Beban Transportasi - BBM/Bensin     Isa (Self)             18.500,00           0,00  Beli bensin bayar Cash 20rb kembalian Koin
+JRN-2026-005 2026-04-20  14:10  1102       Kas Koin (COIN)                     Isa (Self)              1.500,00           0,00  Kembalian koin masuk ke COIN
+JRN-2026-005 2026-04-20  14:10  1101       Kas Tunai Dompet (CASH)             Isa (Self)                  0,00      20.000,00  Uang kertas Rp 20.000 keluar dari CASH
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JRN-2026-006 2026-04-21  10:00  5401       Beban Belanja / Kebutuhan           Isa (Self)            100.000,00           0,00  Beli barang pakai Shopee PayLater
+JRN-2026-006 2026-04-21  10:00  2101       Utang PayLater                      Shopee PayLater             0,00     100.000,00  Timbul kewajiban tagihan SPayLater
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JRN-2026-007 2026-05-05  09:15  2101       Utang PayLater                      Shopee PayLater       100.000,00           0,00  Pelunasan pokok tagihan SPayLater (Non-Konsumsi)
+JRN-2026-007 2026-05-05  09:15  6401       Beban Admin, Pajak & Bunga          Shopee PayLater         5.000,00           0,00  Bunga/Biaya cicilan SPayLater
+JRN-2026-007 2026-05-05  09:15  1111       Bank BCA                            Shopee PayLater             0,00     105.000,00  Dibayar dari BANK BCA
+------------------------------------------------------------------------------------------------------------------------------------------------------
+JRN-2026-008 2026-05-06  20:00  6301       Beban Sosial & Sedekah              Fernando (Nando)        2.500,00           0,00  Write-Off/Ikhlaskan sisa piutang Nando jadi Sedekah
+JRN-2026-008 2026-05-06  20:00  1201       Piutang Pihak Ketiga                Fernando (Nando)            0,00       2.500,00  Pengurangan saldo piutang Fernando
+======================================================================================================================================================
+TOTAL BALANCE CHECK                                                                                   295.000,00     295.000,00  [STATUS: 100% BALANCED]
+======================================================================================================================================================
+```
+
+Selain mode **Double-Entry (2 baris per jurnal)** di atas, di tombol Ekspor yang
+sama juga disediakan opsi **Single-Row Flat Table (1 baris per transaksi)**
+di mana akun Debit dan akun Kredit disandingkan di sebelah kanan-kiri pada satu
+baris yang sama (`Akun_Debit`, `Akun_Kredit`, `Nominal_Debit`, `Nominal_Kredit`,
+`Saldo_Vault`, `Saldo_Total`, `Keterangan_Lengkap`) sehingga sangat mudah
+di-filter di Excel atau Google Sheets!
+
+================================================================================
+              DOKUMEN DESAIN DATA SELESAI & LENGKAP (VERSI 2.0)
+================================================================================
