@@ -44,8 +44,12 @@ Dokumen ini mencatat status seluruh modul yang sudah dirancang maupun yang akan 
 ---
 
 ## Phase 5: Debt/PayLater Sub-Ledger, Interactive Charts, & Accounting Export (COMPLETED)
-- `[x]` **Debt Sub-Ledger & Write-Off**: Endpoint `/api/debt/write-off` untuk mengikhlaskan piutang teman menjadi sedekah/pengeluaran konsumsi riil.
-- `[x]` **Click-to-Chart Interactive Drawer**: Komponen `AutoChartDrawer.jsx` berbasis `@mui/x-charts` yang terbuka otomatis saat Card, Vault, atau Layer diklik, menampilkan grafik tren pengeluaran, timeline saldo, heatmap 24 jam, dan donut distribution.
+- `[x]` **Debt Sub-Ledger & Write-Off**: Endpoint `/api/debt/write-off`, `/api/debts`, dan halaman dedicated `/debts` untuk mengikhlaskan piutang teman menjadi sedekah/pengeluaran konsumsi riil.
+- `[x]` **Wealth Journey Stock-Like Chart**: Grafik pergerakan kekayaan bersih naik-turun dari waktu ke waktu (seperti grafik saham) di `/analytics`.
+- `[x]` **Total Wealth Portfolio Pie Chart**: Donut/Pie Chart di `/analytics` yang menunjukkan distribusi total kekayaan dan di mana saja uang tersimpan saat ini.
+- `[x]` **Dedicated Pages & Responsive Navigation**: Komponen `AppLayout.jsx` dengan sidebar collapsible untuk desktop, drawer buka/tutup & bottom navigation bar untuk Android mobile, serta dedicated pages (`/`, `/analytics`, `/checkpoints`, `/ledger`, `/debts`).
+- `[x]` **Click-to-Chart Interactive Drawer**: Komponen `AutoChartDrawer.jsx` berbasis `@mui/x-charts` yang terbuka otomatis saat Card, Vault, atau Layer diklik.
 - `[x]` **Human & Accountant Export Engine**: Endpoint `/api/export` dan komponen `ExportModal.jsx` yang menghasilkan **Standard Double-Entry Accounting Journal** (kode COA `1xxx`–`6xxx`) dan **Single-Row Flat Ledger Table** (.CSV).
+- `[x]` **Excel General Ledger Injector Tool**: Script `inject-excel.js` (`npm run inject-excel`) untuk menyuntikkan data transaksi nyata dari sheet *Buku Besar Update* `Financial Management.xlsx` ke database SQLite lokal secara atomik, presisi sen, dan otomatis menghasilkan mockup penuh.
 - `[x]` **Clean UI & Rule 11 Compliance**: Info popover `(i)` pada Net Wealth dan 3-Tier Layer, mobile-first Material UI layout, dan 5-second Undo Snackbar (`UndoSnackbar.jsx`).
 

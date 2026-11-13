@@ -1,22 +1,112 @@
 // API Route: GET /api/analytics
-// Returns time-series data and category breakdowns for instant chart drawer
+// Returns time-series data, stock-like wealth journey, and category breakdowns for instant chart drawer
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { toDecimal, roundMoney } from "@/lib/money";
+import { toDecimal, addMoney, subMoney, roundMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const targetType = searchParams.get("type"); // CARD, VAULT, LAYER, PARTY
+    const targetType = searchParams.get("type"); // WEALTH_JOURNEY, CARD, VAULT, LAYER, PARTY
     const targetId = searchParams.get("id");
 
     if (!targetType) {
       return NextResponse.json({ success: false, error: "type parameter is required" }, { status: 400 });
     }
 
+    // ==========================================
+    // 1. STOCK-LIKE WEALTH JOURNEY & PORTFOLIO PIE
+    // ==========================================
+    if (targetType === "WEALTH_JOURNEY") {
+      // 1. Wealth Timeline (Stock-like Area/Line chart of total net wealth over time)
+      const legs = await prisma.transactionLeg.findMany({
+        where: { legRole: "PRIMARY" },
+        include: { transaction: true },
+        orderBy: [{ transaction: { transactionDate: "asc" } }, { id: "asc" }],
+      });
+
+      // Group by date to generate daily net wealth curve
+      const dateMap = new Map();
+      for (const leg of legs) {
+        const dateStr = leg.transaction.transactionDate.toISOString().split("T")[0];
+        dateMap.set(dateStr, toDecimal(leg.runningTotalWealth).toNumber());
+      }
+
+      let wealthTimeline = Array.from(dateMap.entries()).map(([date, wealth]) => ({
+        date,
+        wealth,
+      }));
+
+      // Current Vaults & Distribution Pie
+      const vaults = await prisma.vault.findMany({
+        where: { isActive: true },
+        orderBy: { currentBalance: "desc" },
+      });
+
+      const parties = await prisma.party.findMany({
+        where: { isActive: true },
+      });
+
+      let totalReceivables = toDecimal(0);
+      for (const p of parties) {
+        const bal = toDecimal(p.netReceivableBalance);
+        if (bal.greaterThan(0)) totalReceivables = addMoney(totalReceivables, bal);
+      }
+
+      let liquidTotal = toDecimal(0);
+      const wealthDistributionPie = [];
+      let paletteIdx = 0;
+      const colors = ["#2563EB", "#059669", "#D97706", "#7C3AED", "#DB2777", "#0891B2", "#4F46E5", "#EA580C", "#10B981"];
+
+      for (const v of vaults) {
+        const balNum = toDecimal(v.currentBalance).toNumber();
+        if (balNum > 0) {
+          liquidTotal = addMoney(liquidTotal, toDecimal(v.currentBalance));
+          wealthDistributionPie.push({
+            id: paletteIdx,
+            label: v.name,
+            value: balNum,
+            color: v.colorHex || colors[paletteIdx % colors.length],
+          });
+          paletteIdx++;
+        }
+      }
+
+      // Add Third-Party Receivables slice if any
+      const recNum = totalReceivables.toNumber();
+      if (recNum > 0) {
+        wealthDistributionPie.push({
+          id: paletteIdx,
+          label: "Piutang Teman / Pihak Ketiga",
+          value: recNum,
+          color: "#38BDF8",
+        });
+      }
+
+      // If no transactions yet, show starting baseline from current vaults
+      if (wealthTimeline.length === 0) {
+        const todayStr = new Date().toISOString().split("T")[0];
+        wealthTimeline = [{ date: todayStr, wealth: liquidTotal.toNumber() }];
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          wealthTimeline,
+          wealthDistributionPie,
+          totalLiquid: roundMoney(liquidTotal),
+          totalReceivables: roundMoney(totalReceivables),
+          netTotalWealth: roundMoney(addMoney(liquidTotal, totalReceivables)),
+        },
+      });
+    }
+
+    // ==========================================
+    // 2. ACTION CARD HISTORY
+    // ==========================================
     if (targetType === "CARD") {
       const cardId = parseInt(targetId, 10);
       const card = await prisma.actionCard.findUnique({
@@ -25,7 +115,6 @@ export async function GET(request) {
       });
       if (!card) return NextResponse.json({ success: false, error: "Card not found" }, { status: 404 });
 
-      // Transactions created by this card
       const txs = await prisma.transaction.findMany({
         where: { actionCardId: card.id },
         orderBy: { transactionDate: "asc" },
@@ -38,7 +127,6 @@ export async function GET(request) {
         title: t.title,
       }));
 
-      // Hourly histogram
       let hourlyData = [];
       try {
         const counts = JSON.parse(card.habitStats?.hourCountsJson || "[]");
@@ -59,6 +147,9 @@ export async function GET(request) {
       });
     }
 
+    // ==========================================
+    // 3. VAULT HISTORY
+    // ==========================================
     if (targetType === "VAULT") {
       const vaultId = parseInt(targetId, 10);
       const vault = await prisma.vault.findUnique({
@@ -66,7 +157,6 @@ export async function GET(request) {
       });
       if (!vault) return NextResponse.json({ success: false, error: "Vault not found" }, { status: 404 });
 
-      // Last 30 mutations on this vault
       const legs = await prisma.transactionLeg.findMany({
         where: { vaultId: vault.id },
         include: { transaction: true },
@@ -91,8 +181,11 @@ export async function GET(request) {
       });
     }
 
+    // ==========================================
+    // 4. LAYER CONSUMPTION BREAKDOWN
+    // ==========================================
     if (targetType === "LAYER") {
-      const commitmentType = targetId; // FIXED_MANDATORY, VARIABLE_ESSENTIAL, DISCRETIONARY_JAJAN, SOCIAL_CHARITY
+      const commitmentType = targetId;
 
       const txs = await prisma.transaction.findMany({
         where: { commitmentType },
@@ -100,7 +193,6 @@ export async function GET(request) {
         orderBy: { transactionDate: "asc" },
       });
 
-      // Group by category
       const categoryMap = {};
       for (const t of txs) {
         const catName = t.category?.name || "Lainnya";
@@ -130,6 +222,9 @@ export async function GET(request) {
       });
     }
 
+    // ==========================================
+    // 5. PARTY DEBT HISTORY
+    // ==========================================
     if (targetType === "PARTY") {
       const partyId = parseInt(targetId, 10);
       const party = await prisma.party.findUnique({
@@ -171,4 +266,3 @@ export async function GET(request) {
     );
   }
 }
-

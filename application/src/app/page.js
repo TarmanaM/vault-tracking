@@ -1,13 +1,12 @@
 "use client";
 
 import React from "react";
-import { Container, Box, CircularProgress, Typography, Stack, Button } from "@mui/material";
+import { Container, Box, CircularProgress, Typography, Button } from "@mui/material";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import { useQuery } from "@tanstack/react-query";
 import HeaderSummary from "@/components/HeaderSummary";
 import VaultRibbon from "@/components/VaultRibbon";
 import SmartActionCards from "@/components/SmartActionCards";
-import LayerConsumptionOverview from "@/components/LayerConsumptionOverview";
 import RecentTransactionsList from "@/components/RecentTransactionsList";
 import AutoChartDrawer from "@/components/AutoChartDrawer";
 import ReconcileModal from "@/components/ReconcileModal";
@@ -51,7 +50,7 @@ export default function DashboardPage() {
   const { summary, vaults, actionCards, parties, categories, pendingReminders } = data || {};
 
   return (
-    <Container maxWidth="md" sx={{ py: { xs: 2, sm: 3 } }}>
+    <Container maxWidth="md" sx={{ py: { xs: 1, sm: 2 } }}>
       {/* 1. Header & Total Net Wealth Overview */}
       <HeaderSummary summary={summary} />
 
@@ -77,13 +76,10 @@ export default function DashboardPage() {
       {/* 5. Recommended Smart Action Cards (In-House Routine Ranking) */}
       <SmartActionCards actionCards={actionCards} vaults={vaults} />
 
-      {/* 6. Monthly 3-Tier Layer Consumption Breakdown */}
-      <LayerConsumptionOverview currentMonth={summary?.currentMonth} />
-
-      {/* 7. Live Activity Ledger */}
+      {/* 6. Live Activity Ledger */}
       <RecentTransactionsList />
 
-      {/* 8. Drawers & Modals */}
+      {/* 7. Drawers & Modals */}
       <AutoChartDrawer />
       <ReconcileModal vaults={vaults} />
       <ExportModal />

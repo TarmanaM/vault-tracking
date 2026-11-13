@@ -149,7 +149,7 @@ export default function AutoChartDrawer() {
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
                     Sub-Category Distribution
                   </Typography>
-                  <Box sx={{ width: "100%", height: 240, display: "flex", justifyContent: "center" }}>
+                  <Box sx={{ width: "100%", minWidth: 0, height: 240, display: "flex", justifyContent: "center" }}>
                     <PieChart
                       series={[
                         {
@@ -159,6 +159,7 @@ export default function AutoChartDrawer() {
                           cornerRadius: 4,
                         },
                       ]}
+                      width={260}
                       height={220}
                     />
                   </Box>

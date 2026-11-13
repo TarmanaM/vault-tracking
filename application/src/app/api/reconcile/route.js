@@ -187,3 +187,38 @@ export async function POST(request) {
   }
 }
 
+export async function GET() {
+  try {
+    const [checkpoints, vaults] = await Promise.all([
+      prisma.vaultCheckpoint.findMany({
+        include: {
+          vault: true,
+          denominations: true,
+          linkedTransactions: true,
+        },
+        orderBy: { checkpointTimestamp: "desc" },
+        take: 30,
+      }),
+      prisma.vault.findMany({
+        where: { isActive: true },
+        include: { subContainers: true },
+        orderBy: { sortOrder: "asc" },
+      }),
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        checkpoints,
+        vaults,
+      },
+    });
+  } catch (error) {
+    console.error("Error in GET /api/reconcile:", error);
+    return NextResponse.json(
+      { success: false, error: error.message || "Failed to fetch checkpoints" },
+      { status: 500 }
+    );
+  }
+}
+
