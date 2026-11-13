@@ -5,12 +5,15 @@
 
 # Tech Stack
 
+- **Project Root / Application Directory**: `application/` (Next.js app lives in `application/`)
 - **Framework**: Next.js 15 (App Router, Turbopack, only Javascript not typescript)
 - **Monolith / Runtime**: 1 proses Node.js Next.js (Home Server)
 - **DB**: SQLite (`data-server/main.db`)
 - **Storage**: File fisik bukti transaksi/struk terpusat di `data-server/media/`
 - **ORM**: Prisma (^6.10)
 - **UI Library**: Material UI (MUI v7), Emotion
+- **Charts**: `@mui/x-charts` (^7.0)
+- **Safe Math**: `decimal.js` (for exact cent precision .21/.67)
 - **State & Data Fetching**: TanStack React Query v5
 - **Local State**: Zustand
 - **Auth**: JWT + bcrypt (HTTP-only cookie `auth_token`)
@@ -55,6 +58,7 @@ Agar konteks LLM selalu akurat dan hemat token, baca file spesifik berikut sesua
     - Desain antarmuka wajib nyaman diakses lewat layar HP (WiFi lokal).
     - Mengklik sebuah Card (Action Card, Layer Pengeluaran, Vault, atau Party) harus langsung membuka/menampilkan grafik analitik terkait secara otomatis.
     - Untuk Card `1-Tap Submit`, tampilkan _Snackbar/Toast_ dengan tombol **Undo (5 detik)** untuk mencegah salah pencet tanpa memperlambat input dengan dialog konfirmasi yang mengganggu.
+18. **Prisma Schema Migration (User-Executed Only)**: Agent DILARANG menjalankan perintah `npx prisma migrate dev`, `prisma db push`, atau mengeksekusi migrasi database secara mandiri saat terjadi perubahan pada `schema.prisma`. Agent hanya boleh menulis/mengubah file schema, lalu meminta USER untuk menjalankan `npx prisma migrate dev --name <migration_name>` sendiri di terminal agar file migrasi terbuat dan terkontrol langsung oleh user.
 
 # Karakteristik Deployment
 

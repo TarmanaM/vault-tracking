@@ -17,8 +17,9 @@ Dokumen ini mencatat status seluruh modul yang sudah dirancang maupun yang akan 
 
 ---
 
-## Phase 2: Database & Seed Foundation (NOT STARTED - WAITING FOR USER)
-- `[ ]` **Prisma Schema & SQLite Setup (`data-server/main.db`)**: Implementasi 12 tabel dengan dukungan presisi sen (`.21`, `.67`) dan atomic transaction helpers.
+## Phase 2: Database & Seed Foundation (IN PROGRESS)
+- `[x]` **Core Package Installation (`application/`)**: Next.js 15 (JS, App Router, Turbopack), MUI v7, Emotion, `@mui/x-charts`, `decimal.js`, TanStack Query v5, Zustand, Prisma ^6.10, JWT & bcryptjs.
+- `[ ]` **Prisma Schema & SQLite Setup (`data-server/main.db`)**: Implementasi 12 tabel dengan dukungan presisi sen (`.21`, `.67`) dan atomic transaction helpers. *(Note: Migrasi wajib dieksekusi oleh user via `npx prisma migrate dev`).*
 - `[ ]` **Initial Master Seed (From User's Excel)**:
   - Seed Penyimpanan (`BANK BCA`, `BANK NOBU`, `BANK MANDIRI`, `BANK JAGO`, `GOPAY`, `SPAY`, `DANA`, `CASH` [Sub-container `D1`, `D2`], `COIN` [1000, 500, 200, 100], `TASPEN`, `SHOPEE_PAYLATER`).
   - Seed Peran (`Isa`, `Ibrahim/Dada`, `Fernando/Nando`, `Slamet/Amet`, `DDV`, `Taspen`, `Shopee PayLater`).

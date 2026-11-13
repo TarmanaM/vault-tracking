@@ -38,4 +38,7 @@ User sebelumnya mencatat keuangan menggunakan Google Form yang masuk ke Excel (`
    - Dilengkapi kode akun COA (`1xxx`–`6xxx`) otomatis untuk mengekspor tabel **Double-Entry Accounting Journal** maupun **Single-Row Flat Table**.
 8. **Aturan Agent & Konvensi Bahasa**:
    - Seluruh operasi tulis database wajib atomik (`prisma.$transaction`), presisi sen (`.21`, `.67`) terjaga, UI sistem berbahasa Inggris dengan tombol info `(i)`, sedangkan nama data milik user tetap menggunakan bahasa sehari-hari user.
+9. **Tech Stack & Prisma Migration Workflow**:
+   - Aplikasi berada di subfolder `application/`. Menggunakan Next.js 15 (JS, Turbopack, App Router), MUI v7, `@mui/x-charts`, `decimal.js`, TanStack React Query v5, Zustand, Prisma ^6.10, dan JWT + bcryptjs.
+   - **Prisma Schema Migration Rule**: Agent dilarang menjalankan `prisma migrate dev` secara otomatis; Agent hanya bertugas menyiapkan/mengubah `schema.prisma`, dan eksekusi migrasi diserahkan kepada User agar riwayat file migrasi terkelola dengan baik.
 
