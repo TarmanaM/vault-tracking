@@ -1,12 +1,336 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Prisma Schema for Vault Tracking
+// 100% In-House Personal Finance, Habit Recommendation & Accounting Ledger System
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 1. AUTHENTICATION & USERS
+// ==========================================
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  fullName     String
+  role         String   @default("OWNER") // OWNER, AUDITOR
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ==========================================
+// 2. VAULTS (STORAGE ACCOUNTS & FUNDS)
+// ==========================================
+model Vault {
+  id                Int      @id @default(autoincrement())
+  code              String   @unique // BCA, NOBU, MANDIRI, JAGO, GOPAY, SPAY, DANA, CASH, COIN, TASPEN, SPAYLATER
+  name              String
+  vaultType         String   // BANK, EWALLET, PHYSICAL_CASH, PHYSICAL_COIN, HELD_POOL, LIABILITY_CREDIT_LINE
+  currentBalance    Decimal  @default(0)
+  hasSubContainers  Boolean  @default(false) // True for CASH (e.g. D1, D2 wallets)
+  hasDenominations  Boolean  @default(false) // True for COIN (e.g. 1000, 500, 200, 100 denominations)
+  iconName          String?
+  colorHex          String?
+  sortOrder         Int      @default(0)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  subContainers     VaultSubContainer[]
+  checkpoints       VaultCheckpoint[]
+  transactionLegs   TransactionLeg[]
+  primaryCards      ActionCard[]        @relation("ActionCardDefaultVault")
+  targetCards       ActionCard[]        @relation("ActionCardTargetVault")
+  suggestedReminders PendingReminder[]
+
+  @@map("vaults")
+}
+
+// Sub-containers for physical cash (e.g. D1 Wallet, D2 Reserve Wallet)
+model VaultSubContainer {
+  id                 Int      @id @default(autoincrement())
+  vaultId            Int
+  code               String   // D1, D2
+  name               String
+  lastCountedBalance Decimal  @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  vault              Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, code])
+  @@map("vault_sub_containers")
+}
+
+// ==========================================
+// 3. PARTIES (COUNTERPARTIES & ROLES)
+// ==========================================
+model Party {
+  id                   Int      @id @default(autoincrement())
+  code                 String   @unique // ISA, IBRAHIM, FERNANDO, SLAMET, DDV, TASPEN, SHOPEE_PAYLATER
+  name                 String   // Isa, Ibrahim (Dada), Fernando (Nando), Slamet (Amet)
+  aliasesJson          String?  // JSON array of search aliases e.g. ["Dada", "Sidada"]
+  partyType            String   // SELF, FAMILY, FRIEND, EMPLOYER, INSTITUTION, LENDER
+  netReceivableBalance Decimal  @default(0) // (+) Party owes Isa, (-) Isa owes Party
+  heldFundBalance      Decimal  @default(0) // Undisbursed third-party entitlement (e.g. Taspen/Dada)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  transactions         Transaction[]
+  actionCards          ActionCard[]
+  debtLedgerEntries    DebtLedgerEntry[]
+  suggestedReminders   PendingReminder[]
+
+  @@map("parties")
+}
+
+// ==========================================
+// 4. CATEGORIES (3-TIER TAXONOMY & COA)
+// ==========================================
+model Category {
+  id               Int        @id @default(autoincrement())
+  parentId         Int?
+  code             String     @unique
+  name             String
+  defaultNature    String     // EXPENSE, INCOME, TRANSFER, RECEIVABLE_LEND, RECEIVABLE_COLLECT, PAYABLE_BORROW, PAYABLE_REPAY, INITIAL_FUND, RECONCILIATION_LOST, RECONCILIATION_FOUND
+  commitmentType   String     // FIXED_MANDATORY, VARIABLE_ESSENTIAL, DISCRETIONARY_JAJAN, SOCIAL_CHARITY, NONE
+  priorityTier     String     // PRIMER, SEKUNDER, TERSIER, NONE
+  countsAsConsume  Boolean    @default(true)
+  coaCode          String     // 1xxx-6xxx Chart of Accounts code for double-entry export
+  iconName         String?
+  colorHex         String?
+  sortOrder        Int        @default(0)
+  isActive         Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  // Relations
+  parent           Category?     @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children         Category[]    @relation("CategoryHierarchy")
+  transactions     Transaction[]
+  actionCards      ActionCard[]
+  suggestedReminders PendingReminder[]
+
+  @@map("categories")
+}
+
+// ==========================================
+// 5. ACTION CARDS (SMART SHORTCUT TEMPLATES)
+// ==========================================
+model ActionCard {
+  id                 Int       @id @default(autoincrement())
+  title              String    // "Parkir Kantor", "Beli Bensin Skupi", "Kopi Americano FM"
+  subtitle           String?   // "Rp 12.000 • BANK NOBU"
+  cardActionType     String    // EXPENSE, INCOME, TRANSFER, RECEIVABLE_LEND, RECEIVABLE_COLLECT, SPLIT_CHANGE
+  defaultVaultId     Int?
+  targetVaultId      Int?
+  defaultCategoryId  Int?
+  defaultPartyId     Int?
+  defaultAmount      Decimal?  // Fixed default amount, e.g. 12000
+  quickAmountsJson   String?   // JSON array of amount chips e.g. "[12000, 15000]" or "[30000, 38000, 50000]"
+  oneTapSubmit       Boolean   @default(false) // 1-tap submit with 5s undo snackbar
+  expectedCadence    String?   // DAILY_WORKDAY, DAILY_ANY, WEEKLY, MONTHLY, ON_DEMAND
+  pinPriority        Int       @default(0) // Higher number appears first
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Relations
+  defaultVault       Vault?             @relation("ActionCardDefaultVault", fields: [defaultVaultId], references: [id], onDelete: SetNull)
+  targetVault        Vault?             @relation("ActionCardTargetVault", fields: [targetVaultId], references: [id], onDelete: SetNull)
+  defaultCategory    Category?          @relation(fields: [defaultCategoryId], references: [id], onDelete: SetNull)
+  defaultParty       Party?             @relation(fields: [defaultPartyId], references: [id], onDelete: SetNull)
+  habitStats         CardHabitStats?
+  transactions       Transaction[]
+
+  @@map("action_cards")
+}
+
+// ==========================================
+// 6. CARD HABIT STATS (IN-HOUSE SCORING)
+// ==========================================
+model CardHabitStats {
+  cardId               Int       @id
+  totalUses            Int       @default(0)
+  hourCountsJson       String    @default("[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]") // 24 hourly slots
+  dowCountsJson        String    @default("[0,0,0,0,0,0,0]") // 7 slots: Monday to Sunday
+  avgIntervalDays      Float?
+  stdIntervalDays      Float?
+  lastUsedTimestamp    DateTime?
+  lastUsedDate         DateTime?
+  mostFrequentAmount   Decimal?
+  mostFrequentVaultId  Int?
+
+  card                 ActionCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("card_habit_stats")
+}
+
+// ==========================================
+// 7. VAULT CHECKPOINTS (INITIAL & AUDIT)
+// ==========================================
+model VaultCheckpoint {
+  id                           Int       @id @default(autoincrement())
+  vaultId                      Int
+  checkpointTimestamp          DateTime
+  checkpointDate               DateTime
+  periodLabel                  String    // "Awal (17/10/2024)", "Apr, 2026"
+  checkpointType               String    // INITIAL_FUND, AUDIT_SYNC
+  originalCountedAmount        Decimal   // Physical counted balance at checkpoint time
+  retroactiveDeductionTotal    Decimal   @default(0) // Accumulated deductions from late-remembered transactions
+  effectiveAnchorAmount        Decimal   // originalCountedAmount - retroactiveDeductionTotal
+  systemBookBalanceBefore      Decimal   @default(0) // Balance according to system before reconciliation
+  rawDiscrepancyAmount         Decimal   @default(0) // (+) Unaccounted surplus, (-) Unaccounted shortage/lost
+  resolvedDiscrepancyAmount    Decimal   @default(0) // Discrepancy later explained by backdated transactions
+  unexplainedDiscrepancyAmount Decimal   @default(0) // Remaining unexplained loss/gain
+  notes                        String?
+  createdAt                    DateTime  @default(now())
+
+  // Relations
+  vault                        Vault                    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  denominations                CheckpointDenomination[]
+  linkedTransactions           Transaction[]
+
+  @@map("vault_checkpoints")
+}
+
+// Denominations for physical cash & coins counted during checkpoint
+model CheckpointDenomination {
+  id             Int             @id @default(autoincrement())
+  checkpointId   Int
+  itemType       String          // COIN_PIECE, PAPER_BILL, SUB_WALLET
+  label          String          // "Koin 1000", "Koin 500", "Dompet D1"
+  unitValue      Decimal         // 1000, 500, 200, 100
+  quantity       Int             // 22, 30, 9, 20
+  subtotal       Decimal         // unitValue * quantity
+
+  checkpoint     VaultCheckpoint @relation(fields: [checkpointId], references: [id], onDelete: Cascade)
+
+  @@map("checkpoint_denominations")
+}
+
+// ==========================================
+// 8. TRANSACTIONS (GENERAL LEDGER HEADER)
+// ==========================================
+model Transaction {
+  id                   Int       @id @default(autoincrement())
+  createdAt            DateTime  @default(now()) // Real clock time when entry was submitted
+  transactionDate      DateTime  // Business transaction date
+  transactionTime      String    // HH:mm format e.g. "17:45"
+  monthTag             String    // "Apr,2026" format
+  title                String    // "Parkir kantor", "Jajan Americano Orange FM"
+  nature               String    // EXPENSE, INCOME, TRANSFER, RECEIVABLE_LEND, RECEIVABLE_COLLECT, RECEIVABLE_WRITEOFF, PAYABLE_BORROW, PAYABLE_REPAY, INITIAL_FUND, RECONCILIATION_LOST, RECONCILIATION_FOUND
+  categoryId           Int?
+  commitmentType       String    // FIXED_MANDATORY, VARIABLE_ESSENTIAL, DISCRETIONARY_JAJAN, SOCIAL_CHARITY, NONE
+  priorityTier         String    // PRIMER, SEKUNDER, TERSIER, NONE
+  partyId              Int
+  actionCardId         Int?
+  parentTransactionId  Int?      // Links tax/fee split row to the primary transaction
+  grossAmount          Decimal
+  consumeAmount        Decimal   // (-) For self consumption expenses, (0) for transfer/debt/initial
+  incomeAmount         Decimal   // (+) For true personal income, (0) otherwise
+  isBackdated          Boolean   @default(false)
+  linkedCheckpointId   Int?      // References checkpoint if this transaction absorbed initial fund or explained lost cash
+  proofFilePath        String?   // Local file path for uploaded receipt
+  notes                String?
+
+  // Relations
+  category             Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  party                Party              @relation(fields: [partyId], references: [id])
+  actionCard           ActionCard?        @relation(fields: [actionCardId], references: [id], onDelete: SetNull)
+  linkedCheckpoint     VaultCheckpoint?   @relation(fields: [linkedCheckpointId], references: [id], onDelete: SetNull)
+  parentTransaction    Transaction?       @relation("TransactionSplitRelation", fields: [parentTransactionId], references: [id], onDelete: Cascade)
+  childTransactions    Transaction[]      @relation("TransactionSplitRelation")
+  legs                 TransactionLeg[]
+  debtLedgerEntries    DebtLedgerEntry[]
+  convertedReminders   PendingReminder[]
+
+  @@index([transactionDate])
+  @@index([monthTag])
+  @@index([nature])
+  @@map("transactions")
+}
+
+// ==========================================
+// 9. TRANSACTION LEGS (MULTI-VAULT MUTATIONS)
+// ==========================================
+model TransactionLeg {
+  id                   Int         @id @default(autoincrement())
+  transactionId        Int
+  vaultId              Int
+  legRole              String      // PRIMARY, TRANSFER_TARGET, COIN_CHANGE, ADMIN_FEE
+  debitIn              Decimal     @default(0) // Inflow (+)
+  creditOut            Decimal     @default(0) // Outflow (-)
+  netMutation          Decimal     // debitIn - creditOut
+  runningVaultBalance  Decimal     // Running balance of this specific vault
+  runningTotalWealth   Decimal     // Running balance of total aggregate wealth across all vaults
+
+  transaction          Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  vault                Vault       @relation(fields: [vaultId], references: [id])
+
+  @@index([transactionId])
+  @@index([vaultId])
+  @@map("transaction_legs")
+}
+
+// ==========================================
+// 10. DEBT LEDGER ENTRIES (UTANG & PIUTANG)
+// ==========================================
+model DebtLedgerEntry {
+  id                   Int              @id @default(autoincrement())
+  transactionId        Int
+  partyId              Int
+  entryCategory        String           // RECEIVABLE, PAYABLE, HELD_RIGHT
+  direction            String           // INCREASE, DECREASE
+  settlementMethod     String           // CASH_OR_BANK, OFFSET_DEDUCTION, WRITEOFF_FORGIVEN
+  amount               Decimal
+  referenceDebtId      Int?             // Points to original debt entry being settled
+  remainingOpenAmount  Decimal          @default(0)
+  status               String           @default("OPEN") // OPEN, PARTIAL, SETTLED
+  notes                String?
+  createdAt            DateTime         @default(now())
+
+  transaction          Transaction      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  party                Party            @relation(fields: [partyId], references: [id])
+  referenceDebt        DebtLedgerEntry? @relation("DebtSettlementChain", fields: [referenceDebtId], references: [id], onDelete: SetNull)
+  settlementEntries    DebtLedgerEntry[] @relation("DebtSettlementChain")
+
+  @@index([partyId])
+  @@index([status])
+  @@map("debt_ledger_entries")
+}
+
+// ==========================================
+// 11. PENDING REMINDERS & DRAFT CARDS
+// ==========================================
+model PendingReminder {
+  id                   Int          @id @default(autoincrement())
+  createdAt            DateTime     @default(now())
+  dueDate              DateTime?
+  reminderType         String       // ASK_AMOUNT, PAYLATER_BILL, DRAFT_TX
+  title                String       // "Tanya Nando patungan kopi", "Bayar SPayLater tgl 5"
+  estimatedAmount      Decimal?
+  suggestedVaultId     Int?
+  suggestedPartyId     Int?
+  suggestedCategoryId  Int?
+  status               String       @default("PENDING") // PENDING, CONVERTED_TO_TX, DISMISSED
+  convertedTransactionId Int?
+  notes                String?
+
+  suggestedVault       Vault?       @relation(fields: [suggestedVaultId], references: [id], onDelete: SetNull)
+  suggestedParty       Party?       @relation(fields: [suggestedPartyId], references: [id], onDelete: SetNull)
+  suggestedCategory    Category?    @relation(fields: [suggestedCategoryId], references: [id], onDelete: SetNull)
+  convertedTransaction Transaction? @relation(fields: [convertedTransactionId], references: [id], onDelete: SetNull)
+
+  @@map("pending_reminders")
 }

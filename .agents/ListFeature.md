@@ -17,32 +17,35 @@ Dokumen ini mencatat status seluruh modul yang sudah dirancang maupun yang akan 
 
 ---
 
-## Phase 2: Database & Seed Foundation (IN PROGRESS)
+## Phase 2: Database & Seed Foundation (COMPLETED)
 - `[x]` **Core Package Installation (`application/`)**: Next.js 15 (JS, App Router, Turbopack), MUI v7, Emotion, `@mui/x-charts`, `decimal.js`, TanStack Query v5, Zustand, Prisma ^6.10, JWT & bcryptjs.
-- `[ ]` **Prisma Schema & SQLite Setup (`data-server/main.db`)**: Implementasi 12 tabel dengan dukungan presisi sen (`.21`, `.67`) dan atomic transaction helpers. *(Note: Migrasi wajib dieksekusi oleh user via `npx prisma migrate dev`).*
-- `[ ]` **Initial Master Seed (From User's Excel)**:
-  - Seed Penyimpanan (`BANK BCA`, `BANK NOBU`, `BANK MANDIRI`, `BANK JAGO`, `GOPAY`, `SPAY`, `DANA`, `CASH` [Sub-container `D1`, `D2`], `COIN` [1000, 500, 200, 100], `TASPEN`, `SHOPEE_PAYLATER`).
-  - Seed Peran (`Isa`, `Ibrahim/Dada`, `Fernando/Nando`, `Slamet/Amet`, `DDV`, `Taspen`, `Shopee PayLater`).
-  - Seed 15 Action Cards awal (*Parkir Kantor Rp 12.000*, *Bensin Skupi Rp 38.000*, *Kopi FM*, *Makan Siang*, *Sarapan*, *Rokok*, *Warnet*, *Gajian DDV*, dll.).
+- `[x]` **Prisma Schema & SQLite Setup (`data-server/main.db`)**: 12 tabel relasional aktif dengan dukungan presisi sen (`.21`, `.67`) dan atomic transaction helpers. Migrasi `20261113151943_init_vault_tracking` sukses dieksekusi user.
+- `[x]` **Initial Master Seed (From User's Excel)**:
+  - Seed 11 Penyimpanan (`BANK BCA`, `BANK NOBU`, `BANK MANDIRI`, `BANK JAGO`, `GOPAY`, `SPAY`, `DANA`, `CASH` [Sub-container `D1`, `D2`], `COIN` [1000, 500, 200, 100], `TASPEN`, `SHOPEE_PAYLATER`).
+  - Seed 7 Peran (`Isa`, `Ibrahim/Dada`, `Fernando/Nando`, `Slamet/Amet`, `DDV`, `Taspen`, `Shopee PayLater`).
+  - Seed 10 Action Cards awal lengkap dengan profil Habit Stats.
 
 ---
 
-## Phase 3: Core Ledger & Smart Action Cards Engine (NOT STARTED)
-- `[ ]` **In-House Habit Recommendation Engine**: Perhitungan skor real-time berbasis jam (`00–23`), hari (`Senin–Minggu`), dan siklus interval hari (`avg_interval_days`) + anti-spam cooldown.
-- `[ ]` **1-Tap & Quick-Amount Action Cards UI**: Dilengkapi *Quick Vault Pill Switcher*, field opsional `+ Tax / Admin Fee` (Auto-Split 2 baris), opsi *Coin Change to COIN*, dan *5-Second Undo Toast*.
-- `[ ]` **Pending Reminders / Draft Banner**: Kartu pengingat di bagian atas layar untuk transaksi yang belum pasti nominalnya (*"Tanya Nando kopi berapa"*, *"Tagihan SPayLater"*).
+## Phase 3: Core Ledger & Smart Action Cards Engine (COMPLETED)
+- `[x]` **In-House Habit Recommendation Engine**: Algoritma skor deterministik in-house (`habitEngine.js`) berbasis jam (`00–23`), hari (`Senin–Minggu`), dan jeda interval (`avg_interval_days`) + anti-spam cooldown.
+- `[x]` **1-Tap & Quick-Amount Action Cards UI**: Komponen `SmartActionCards.jsx` dengan *Quick Vault Pill Switcher*, chip nominal cepat, opsi `+ Tax / Admin Fee` (Auto-Split 2 baris), dan *5-Second Undo Toast*.
+- `[x]` **Pending Reminders & Draft Cards Banner**: Komponen `PendingRemindersBanner.jsx` untuk catatan cepat dan reminder tagihan yang dapat langsung dikonversi menjadi transaksi.
+- `[x]` **Custom & Backdated Transaction Modal**: Komponen `CustomTransactionModal.jsx` untuk input transaksi manual dan transaksi susulan masa lalu.
+- `[x]` **Atomic Double-Entry Engine (`ledgerService.js`)**: Pembuatan transaksi atomik multi-legs, auto-split pajak terpisah, dan pemenuhan Strict Consume Invariant (Rule 15).
 
 ---
 
-## Phase 4: Reconciliation, Coin Calculator, & Backdated Absorption (NOT STARTED)
-- `[ ]` **Initial Fund & Periodic Checkpoint Audit**: Deteksi otomatis *Uang Hilang* (`RECONCILIATION_LOST`) dan *Uang Masuk Tak Terduga / Bunga Bank* (`RECONCILIATION_FOUND`).
-- `[ ]` **Physical Cash (`D1/D2`) & Coin Denomination Calculator**: Hitung kepingan koin (`1000`, `500`, `200`, `100`) + *Auto Cross-Vault Offset* (deteksi otomatis uang kertas `CASH` yang berubah jadi `COIN`).
-- `[ ]` **Retroactive / Backdated Transaction Absorption**: Input transaksi lama yang baru diingat dengan otomatis memotong `Dana Awal` atau mengurangi angka `Uang Hilang` agar saldo akhir tetap 100% sinkron.
+## Phase 4: Reconciliation, Coin Calculator, & Backdated Absorption (COMPLETED)
+- `[x]` **Initial Fund & Periodic Checkpoint Audit**: Endpoint `/api/reconcile` dan komponen `ReconcileModal.jsx` yang mendeteksi otomatis *Uang Hilang* (`RECONCILIATION_LOST`) dan *Surplus / Bunga Bank* (`RECONCILIATION_FOUND`).
+- `[x]` **Physical Cash (`D1/D2`) & Coin Denomination Calculator**: Form hitung fisik dompet `D1`/`D2` dan keping koin (`1000`, `500`, `200`, `100`) dengan kalkulasi subtotal instan.
+- `[x]` **Retroactive / Backdated Absorption Engine**: Service penyerapan transaksi lama yang otomatis memotong `Dana Awal` atau mengurangi angka `Uang Hilang` tanpa merusak saldo akhir.
 
 ---
 
-## Phase 5: Debt/PayLater Sub-Ledger, Interactive Charts, & Accounting Export (NOT STARTED)
-- `[ ]` **Human-Friendly Debt & PayLater Manager**: Alur *Lend/Talangi*, *Collect/Terima Bayar*, *Forgive/Write-Off to Charity*, *Held Fund Offset (Kasus Taspen/Dada)*, dan *PayLater Billing* tanpa dobel hitung `Consume`.
-- `[ ]` **Click-to-Chart Interactive Drawer**: Klik Card (Action Card, Layer Pengeluaran, Vault, atau Party) langsung membuka grafik tren waktu, komposisi Donut Chart, dan statistik frekuensi + tombol info `(i)`.
-- `[ ]` **Human & Accountant Export Engine**: Ekspor ke format **Standard Double-Entry Accounting Journal** (dengan kode COA `1xxx`–`6xxx` seimbang Debit = Kredit) dan **Single-Row Flat Ledger Table** (`.CSV` / `.XLSX` / `.TXT`).
+## Phase 5: Debt/PayLater Sub-Ledger, Interactive Charts, & Accounting Export (COMPLETED)
+- `[x]` **Debt Sub-Ledger & Write-Off**: Endpoint `/api/debt/write-off` untuk mengikhlaskan piutang teman menjadi sedekah/pengeluaran konsumsi riil.
+- `[x]` **Click-to-Chart Interactive Drawer**: Komponen `AutoChartDrawer.jsx` berbasis `@mui/x-charts` yang terbuka otomatis saat Card, Vault, atau Layer diklik, menampilkan grafik tren pengeluaran, timeline saldo, heatmap 24 jam, dan donut distribution.
+- `[x]` **Human & Accountant Export Engine**: Endpoint `/api/export` dan komponen `ExportModal.jsx` yang menghasilkan **Standard Double-Entry Accounting Journal** (kode COA `1xxx`–`6xxx`) dan **Single-Row Flat Ledger Table** (.CSV).
+- `[x]` **Clean UI & Rule 11 Compliance**: Info popover `(i)` pada Net Wealth dan 3-Tier Layer, mobile-first Material UI layout, dan 5-second Undo Snackbar (`UndoSnackbar.jsx`).
 
