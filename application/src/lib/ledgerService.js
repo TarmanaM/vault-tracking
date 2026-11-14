@@ -3,8 +3,14 @@
 // Rule 14 (Decimal precision), and Rule 15 (Strict Consume Invariant)
 
 import prisma from "./prisma.js";
-import { toDecimal, addMoney, subMoney, roundMoney } from "./money.js";
+import { toDecimal, addMoney, subMoney, mulMoney, divMoney, roundMoney } from "./money.js";
 import { recordCardUsage } from "./habitEngine.js";
+import { getOrCreateAppSettings, resolveFxRate } from "./fxService.js";
+import {
+  ensureDefaultSubContainer,
+  applySubVaultMutationInTx,
+  evaluateBasePartitionState,
+} from "./subVaultService.js";
 
 /**
  * Recompute a Party's separate Receivable, Payable, and Net balances from open debt entries
@@ -285,8 +291,12 @@ export async function createTransaction(payload) {
       partyId,
       actionCardId = null,
       sourceVaultId = null,
+      sourceSubContainerId = null,
       targetVaultId = null,
+      targetSubContainerId = null,
       grossAmount,
+      targetAmount = null,
+      manualFxRate = null,
       taxFeeAmount = 0,
       coinUsedAmount = 0,
       coinChangeAmount = 0,
@@ -297,6 +307,9 @@ export async function createTransaction(payload) {
       payableMode = "EXPENSE_TALANG", // EXPENSE_TALANG | CASH_LOAN
       referenceDebtId = null,
     } = payload;
+
+    const appSetting = await getOrCreateAppSettings(tx);
+    const baseCurrency = String(appSetting.baseCurrency || "IDR").toUpperCase();
 
     const party = await tx.party.findUnique({ where: { id: parseInt(partyId, 10) } });
     if (!party) throw new Error(`Party with id ${partyId} not found`);
@@ -313,6 +326,24 @@ export async function createTransaction(payload) {
       sourceVault = await tx.vault.findUnique({ where: { id: parseInt(sourceVaultId, 10) } });
     }
 
+    // Resolve target Sub-Vault (defaults automatically to Vault's Default Sub-Vault if omitted)
+    let sourceSubContainer = null;
+    if (sourceVault) {
+      if (sourceSubContainerId) {
+        sourceSubContainer = await tx.vaultSubContainer.findUnique({
+          where: { id: parseInt(sourceSubContainerId, 10) },
+        });
+        if (!sourceSubContainer || sourceSubContainer.vaultId !== sourceVault.id) {
+          throw new Error("Selected sub-vault does not belong to source vault");
+        }
+      } else {
+        sourceSubContainer = await ensureDefaultSubContainer(tx, sourceVault.id);
+      }
+    }
+
+    const entryCurrency = String(sourceSubContainer?.currency || baseCurrency).toUpperCase();
+    const isForeignEntry = entryCurrency !== baseCurrency;
+
     // Parse business timestamp
     const txDate = new Date(transactionDate);
     let txTime = transactionTime;
@@ -324,12 +355,12 @@ export async function createTransaction(payload) {
     }
 
     const monthTag = `${txDate.toLocaleString("en-US", { month: "short" })},${txDate.getFullYear()}`;
-    const grossDec = roundMoney(grossAmount);
-    const taxDec = roundMoney(taxFeeAmount);
+    const entryAmountDec = roundMoney(grossAmount);
+    const entryTaxDec = roundMoney(taxFeeAmount);
     const coinUsedDec = roundMoney(coinUsedAmount || 0);
     const changeDec = roundMoney(coinChangeAmount || 0);
 
-    if (grossDec.lessThanOrEqualTo(0)) {
+    if (entryAmountDec.lessThanOrEqualTo(0)) {
       throw new Error("Transaction amount must be greater than zero");
     }
     if (coinUsedDec.lessThan(0) || changeDec.lessThan(0)) {
@@ -341,9 +372,26 @@ export async function createTransaction(payload) {
     if ((coinUsedDec.greaterThan(0) || changeDec.greaterThan(0)) && nature !== "EXPENSE") {
       throw new Error("Coin split and coin change options only apply to EXPENSE transactions");
     }
-    if (coinUsedDec.greaterThan(grossDec)) {
+    if ((coinUsedDec.greaterThan(0) || changeDec.greaterThan(0)) && isForeignEntry) {
+      throw new Error("Coin split and coin change only apply to base currency cash transactions");
+    }
+    if (coinUsedDec.greaterThan(entryAmountDec)) {
       throw new Error("Coin split payment cannot exceed total transaction amount");
     }
+
+    const fxInfo = await resolveFxRate({
+      fromCurrency: entryCurrency,
+      baseCurrency,
+      manualFxRate,
+      tx,
+    });
+    const grossDec = isForeignEntry
+      ? roundMoney(mulMoney(entryAmountDec, fxInfo.rateDec))
+      : entryAmountDec;
+    const originalGrossDec = isForeignEntry ? entryAmountDec : null;
+    const taxBaseDec = isForeignEntry
+      ? roundMoney(mulMoney(entryTaxDec, fxInfo.rateDec))
+      : entryTaxDec;
 
     // #15 Auto-Detect Retroactive if txDate is earlier than the latest checkpoint of sourceVault
     let isBackdated = false;
@@ -359,7 +407,7 @@ export async function createTransaction(payload) {
       }
     }
 
-    // Rule 15: Strict Consume Invariant
+    // Rule 15: Strict Consume Invariant (always locked in Base Currency)
     let consumeDec = toDecimal(0);
     let incomeDec = toDecimal(0);
 
@@ -385,6 +433,9 @@ export async function createTransaction(payload) {
         priorityTier,
         partyId: party.id,
         actionCardId: actionCardId ? parseInt(actionCardId, 10) : null,
+        currency: entryCurrency,
+        originalGrossAmount: originalGrossDec,
+        fxRateApplied: fxInfo.rateDec,
         grossAmount: grossDec,
         consumeAmount: consumeDec,
         incomeAmount: incomeDec,
@@ -395,7 +446,6 @@ export async function createTransaction(payload) {
       },
     });
 
-    // Save external bank/e-wallet note for future autocomplete if provided
     if (counterpartyAccountNote) {
       await rememberPartyExternalAccount(tx, party, counterpartyAccountNote);
     }
@@ -418,9 +468,8 @@ export async function createTransaction(payload) {
     let absorbAmountToAnchor = toDecimal(0);
 
     async function handleAbsorptionIfBackdated(mutationDeltaDec) {
-      if (!isBackdated || !linkedCheckpoint) return true; // Mutate currentBalance normally
+      if (!isBackdated || !linkedCheckpoint) return true;
 
-      // Try absorbing into RECONCILIATION_LOST of the linked checkpoint first
       const lostTx = await tx.transaction.findFirst({
         where: {
           linkedCheckpointId: linkedCheckpoint.id,
@@ -463,7 +512,6 @@ export async function createTransaction(payload) {
         absorbAmountToAnchor = absDelta;
       }
 
-      // Update checkpoint anchor tracking so ending vault balance remains 100% synced
       const updatedDeduction =
         mutationDeltaDec.lessThan(0)
           ? addMoney(linkedCheckpoint.retroactiveDeductionTotal, absDelta)
@@ -481,47 +529,127 @@ export async function createTransaction(payload) {
         },
       });
 
-      return false; // Do not mutate live currentBalance because checkpoint already counted reality after txDate
+      return false;
+    }
+
+    let txSubVaultWarning = false;
+
+    async function applyVaultLegMutation({
+      vaultObj,
+      subObj = null,
+      legRole = "PRIMARY",
+      signedEntryDelta,
+      baseAbsDec,
+      legCurrency = baseCurrency,
+      rateDec = toDecimal(1),
+      skipAbsorption = false,
+      txRef = createdTx,
+    }) {
+      const ccy = String(legCurrency || baseCurrency).toUpperCase();
+      const isForeign = ccy !== baseCurrency;
+      const isInflow = signedEntryDelta.greaterThan(0);
+
+      if (isForeign) {
+        if (!isBackdated && subObj) {
+          await applySubVaultMutationInTx(tx, {
+            vaultId: vaultObj.id,
+            subContainerId: subObj.id,
+            mutationAmount: signedEntryDelta,
+            baseCurrency,
+            contextLabel: title,
+          });
+        }
+        await tx.transactionLeg.create({
+          data: {
+            transactionId: txRef.id,
+            vaultId: vaultObj.id,
+            subContainerId: subObj?.id || null,
+            legRole,
+            currency: ccy,
+            fxRateApplied: rateDec,
+            originalMutation: roundMoney(signedEntryDelta),
+            debitIn: toDecimal(0),
+            creditOut: toDecimal(0),
+            netMutation: toDecimal(0),
+            runningVaultBalance: roundMoney(vaultObj.currentBalance),
+            runningTotalWealth: roundMoney(vaultObj.currentBalance),
+          },
+        });
+        return true;
+      }
+
+      const signedBaseDelta = roundMoney(signedEntryDelta);
+      const shouldMutateLive = skipAbsorption
+        ? true
+        : await handleAbsorptionIfBackdated(signedBaseDelta);
+
+      let newVaultBal = toDecimal(vaultObj.currentBalance);
+      if (shouldMutateLive) {
+        newVaultBal = addMoney(vaultObj.currentBalance, signedBaseDelta);
+        await tx.vault.update({
+          where: { id: vaultObj.id },
+          data: { currentBalance: roundMoney(newVaultBal) },
+        });
+        vaultObj.currentBalance = roundMoney(newVaultBal);
+
+        if (subObj) {
+          const subRes = await applySubVaultMutationInTx(tx, {
+            vaultId: vaultObj.id,
+            subContainerId: subObj.id,
+            mutationAmount: signedBaseDelta,
+            baseCurrency,
+            contextLabel: title,
+          });
+          if (subRes.triggeredWarning) {
+            txSubVaultWarning = true;
+          }
+        }
+      }
+
+      await tx.transactionLeg.create({
+        data: {
+          transactionId: txRef.id,
+          vaultId: vaultObj.id,
+          subContainerId: subObj?.id || null,
+          legRole,
+          currency: baseCurrency,
+          fxRateApplied: toDecimal(1),
+          originalMutation: signedBaseDelta,
+          debitIn: isInflow ? roundMoney(baseAbsDec) : toDecimal(0),
+          creditOut: isInflow ? toDecimal(0) : roundMoney(baseAbsDec),
+          netMutation: signedBaseDelta,
+          runningVaultBalance: roundMoney(newVaultBal),
+          runningTotalWealth: roundMoney(newVaultBal),
+        },
+      });
+      return shouldMutateLive;
     }
 
     // 2. Create Transaction Legs & Debt Ledger Entries depending on nature
     if (nature === "EXPENSE" || nature === "RECEIVABLE_LEND" || nature === "PAYABLE_REPAY") {
-      // Cash + Coin split reduces CASH by (gross - coinUsed); coin change increases CASH outflow by (gross + changeDec)
       const primaryOutflowDec =
         nature === "EXPENSE" && coinUsedDec.greaterThan(0)
-          ? subMoney(grossDec, coinUsedDec)
+          ? subMoney(entryAmountDec, coinUsedDec)
           : nature === "EXPENSE" && changeDec.greaterThan(0)
-          ? addMoney(grossDec, changeDec)
-          : grossDec;
+          ? addMoney(entryAmountDec, changeDec)
+          : entryAmountDec;
 
       if (primaryOutflowDec.greaterThan(0)) {
-        const delta = primaryOutflowDec.negated();
-        const shouldMutateLive = await handleAbsorptionIfBackdated(delta);
-
-        let newSourceBalance = toDecimal(sourceVault.currentBalance);
-        if (shouldMutateLive) {
-          newSourceBalance = subMoney(sourceVault.currentBalance, primaryOutflowDec);
-          await tx.vault.update({
-            where: { id: sourceVault.id },
-            data: { currentBalance: roundMoney(newSourceBalance) },
-          });
-        }
-
-        await tx.transactionLeg.create({
-          data: {
-            transactionId: createdTx.id,
-            vaultId: sourceVault.id,
-            legRole: "PRIMARY",
-            debitIn: toDecimal(0),
-            creditOut: primaryOutflowDec,
-            netMutation: delta,
-            runningVaultBalance: roundMoney(newSourceBalance),
-            runningTotalWealth: roundMoney(newSourceBalance),
-          },
+        const primaryBaseAbs = isForeignEntry
+          ? roundMoney(mulMoney(primaryOutflowDec, fxInfo.rateDec))
+          : primaryOutflowDec;
+        await applyVaultLegMutation({
+          vaultObj: sourceVault,
+          subObj: sourceSubContainer,
+          legRole: "PRIMARY",
+          signedEntryDelta: primaryOutflowDec.negated(),
+          baseAbsDec: primaryBaseAbs,
+          legCurrency: entryCurrency,
+          rateDec: fxInfo.rateDec,
         });
       }
 
-      // Coin split outflow (e.g. Cash + Coin combined payment) or coin change inflow (kembalian koin)
+      // Coin split outflow (Cash + Coin combined payment) or coin change inflow
       if (coinUsedDec.greaterThan(0) || changeDec.greaterThan(0)) {
         const coinVault = await tx.vault.findFirst({
           where: { OR: [{ code: "COIN" }, { vaultType: "PHYSICAL_COIN" }] },
@@ -535,6 +663,7 @@ export async function createTransaction(payload) {
           orderBy: { checkpointTimestamp: "desc" },
         });
         const isCoinBackdated = Boolean(coinCp && txDate < coinCp.checkpointTimestamp);
+        const coinDefaultSub = await ensureDefaultSubContainer(tx, coinVault.id);
 
         if (coinUsedDec.greaterThan(0)) {
           const coinDelta = coinUsedDec.negated();
@@ -545,13 +674,26 @@ export async function createTransaction(payload) {
               where: { id: coinVault.id },
               data: { currentBalance: roundMoney(newCoinBalance) },
             });
+            if (coinDefaultSub) {
+              await applySubVaultMutationInTx(tx, {
+                vaultId: coinVault.id,
+                subContainerId: coinDefaultSub.id,
+                mutationAmount: coinDelta,
+                baseCurrency,
+                contextLabel: title,
+              });
+            }
           }
 
           await tx.transactionLeg.create({
             data: {
               transactionId: createdTx.id,
               vaultId: coinVault.id,
+              subContainerId: coinDefaultSub?.id || null,
               legRole: "COIN_SPLIT",
+              currency: baseCurrency,
+              fxRateApplied: toDecimal(1),
+              originalMutation: coinDelta,
               debitIn: toDecimal(0),
               creditOut: coinUsedDec,
               netMutation: coinDelta,
@@ -567,13 +709,26 @@ export async function createTransaction(payload) {
               where: { id: coinVault.id },
               data: { currentBalance: roundMoney(newCoinBalance) },
             });
+            if (coinDefaultSub) {
+              await applySubVaultMutationInTx(tx, {
+                vaultId: coinVault.id,
+                subContainerId: coinDefaultSub.id,
+                mutationAmount: changeDec,
+                baseCurrency,
+                contextLabel: title,
+              });
+            }
           }
 
           await tx.transactionLeg.create({
             data: {
               transactionId: createdTx.id,
               vaultId: coinVault.id,
+              subContainerId: coinDefaultSub?.id || null,
               legRole: "COIN_CHANGE",
+              currency: baseCurrency,
+              fxRateApplied: toDecimal(1),
+              originalMutation: changeDec,
               debitIn: changeDec,
               creditOut: toDecimal(0),
               netMutation: changeDec,
@@ -612,28 +767,16 @@ export async function createTransaction(payload) {
         });
         await recomputePartyBalances(tx, party.id);
       }
-    } else if (nature === "INCOME" || nature === "RECEIVABLE_COLLECT") {
-      const shouldMutateLive = await handleAbsorptionIfBackdated(grossDec);
-      let newSourceBalance = toDecimal(sourceVault.currentBalance);
-      if (shouldMutateLive) {
-        newSourceBalance = addMoney(sourceVault.currentBalance, grossDec);
-        await tx.vault.update({
-          where: { id: sourceVault.id },
-          data: { currentBalance: roundMoney(newSourceBalance) },
-        });
-      }
-
-      await tx.transactionLeg.create({
-        data: {
-          transactionId: createdTx.id,
-          vaultId: sourceVault.id,
-          legRole: "PRIMARY",
-          debitIn: grossDec,
-          creditOut: toDecimal(0),
-          netMutation: grossDec,
-          runningVaultBalance: roundMoney(newSourceBalance),
-          runningTotalWealth: roundMoney(newSourceBalance),
-        },
+    } else if (nature === "INCOME" || nature === "RECEIVABLE_COLLECT" || nature === "INITIAL_FUND") {
+      await applyVaultLegMutation({
+        vaultObj: sourceVault,
+        subObj: sourceSubContainer,
+        legRole: "PRIMARY",
+        signedEntryDelta: entryAmountDec,
+        baseAbsDec: grossDec,
+        legCurrency: entryCurrency,
+        rateDec: fxInfo.rateDec,
+        skipAbsorption: nature === "INITIAL_FUND",
       });
 
       if (nature === "RECEIVABLE_COLLECT") {
@@ -650,29 +793,15 @@ export async function createTransaction(payload) {
         await recomputePartyBalances(tx, party.id);
       }
     } else if (nature === "PAYABLE_BORROW") {
-      // #17: User borrows from party or gets treated/covered (ditalangin)
       if (payableMode === "CASH_LOAN" && sourceVault) {
-        const shouldMutateLive = await handleAbsorptionIfBackdated(grossDec);
-        let newSourceBalance = toDecimal(sourceVault.currentBalance);
-        if (shouldMutateLive) {
-          newSourceBalance = addMoney(sourceVault.currentBalance, grossDec);
-          await tx.vault.update({
-            where: { id: sourceVault.id },
-            data: { currentBalance: roundMoney(newSourceBalance) },
-          });
-        }
-
-        await tx.transactionLeg.create({
-          data: {
-            transactionId: createdTx.id,
-            vaultId: sourceVault.id,
-            legRole: "PRIMARY",
-            debitIn: grossDec,
-            creditOut: toDecimal(0),
-            netMutation: grossDec,
-            runningVaultBalance: roundMoney(newSourceBalance),
-            runningTotalWealth: roundMoney(newSourceBalance),
-          },
+        await applyVaultLegMutation({
+          vaultObj: sourceVault,
+          subObj: sourceSubContainer,
+          legRole: "PRIMARY",
+          signedEntryDelta: entryAmountDec,
+          baseAbsDec: grossDec,
+          legCurrency: entryCurrency,
+          rateDec: fxInfo.rateDec,
         });
       }
 
@@ -695,57 +824,77 @@ export async function createTransaction(payload) {
       const targetVault = await tx.vault.findUnique({ where: { id: parseInt(targetVaultId, 10) } });
       if (!targetVault) throw new Error("Target vault not found");
 
-      const newSourceBalance = subMoney(sourceVault.currentBalance, grossDec);
-      const newTargetBalance = addMoney(targetVault.currentBalance, grossDec);
+      let targetSubContainer = null;
+      if (targetSubContainerId) {
+        targetSubContainer = await tx.vaultSubContainer.findUnique({
+          where: { id: parseInt(targetSubContainerId, 10) },
+        });
+        if (!targetSubContainer || targetSubContainer.vaultId !== targetVault.id) {
+          throw new Error("Selected target sub-vault does not belong to target vault");
+        }
+      } else {
+        targetSubContainer = await ensureDefaultSubContainer(tx, targetVault.id);
+      }
 
-      await tx.vault.update({
-        where: { id: sourceVault.id },
-        data: { currentBalance: roundMoney(newSourceBalance) },
-      });
-      await tx.vault.update({
-        where: { id: targetVault.id },
-        data: { currentBalance: roundMoney(newTargetBalance) },
+      if (
+        targetVault.id === sourceVault.id &&
+        (sourceSubContainer?.id || null) === (targetSubContainer?.id || null)
+      ) {
+        throw new Error("Source and destination vaults/sub-vaults cannot be the exact same pocket");
+      }
+
+      const targetCurrency = String(targetSubContainer?.currency || baseCurrency).toUpperCase();
+      let targetEntryDec = entryAmountDec;
+      let targetRateDec = toDecimal(1);
+
+      if (targetCurrency !== entryCurrency) {
+        const targetFx = await resolveFxRate({
+          fromCurrency: targetCurrency,
+          baseCurrency,
+          tx,
+        });
+        targetRateDec = targetFx.rateDec;
+        if (targetAmount && Number(targetAmount) > 0) {
+          targetEntryDec = roundMoney(targetAmount);
+        } else if (targetCurrency === baseCurrency) {
+          targetEntryDec = grossDec;
+        } else {
+          targetEntryDec = roundMoney(divMoney(grossDec, targetFx.rateDec));
+        }
+      }
+
+      await applyVaultLegMutation({
+        vaultObj: sourceVault,
+        subObj: sourceSubContainer,
+        legRole: "PRIMARY",
+        signedEntryDelta: entryAmountDec.negated(),
+        baseAbsDec: grossDec,
+        legCurrency: entryCurrency,
+        rateDec: fxInfo.rateDec,
+        skipAbsorption: true,
       });
 
-      await tx.transactionLeg.create({
-        data: {
-          transactionId: createdTx.id,
-          vaultId: sourceVault.id,
-          legRole: "PRIMARY",
-          debitIn: toDecimal(0),
-          creditOut: grossDec,
-          netMutation: grossDec.negated(),
-          runningVaultBalance: roundMoney(newSourceBalance),
-          runningTotalWealth: roundMoney(newSourceBalance),
-        },
-      });
+      const reloadedTarget =
+        targetVault.id === sourceVault.id
+          ? sourceVault
+          : targetVault;
 
-      await tx.transactionLeg.create({
-        data: {
-          transactionId: createdTx.id,
-          vaultId: targetVault.id,
-          legRole: "TRANSFER_TARGET",
-          debitIn: grossDec,
-          creditOut: toDecimal(0),
-          netMutation: grossDec,
-          runningVaultBalance: roundMoney(newTargetBalance),
-          runningTotalWealth: roundMoney(newTargetBalance),
-        },
+      await applyVaultLegMutation({
+        vaultObj: reloadedTarget,
+        subObj: targetSubContainer,
+        legRole: "TRANSFER_TARGET",
+        signedEntryDelta: targetEntryDec,
+        baseAbsDec: grossDec,
+        legCurrency: targetCurrency,
+        rateDec: targetRateDec,
+        skipAbsorption: true,
       });
     }
 
     // 3. Auto-Split Tax / Admin Fee into separate row if present
-    if (taxDec.greaterThan(0) && sourceVault) {
+    if (entryTaxDec.greaterThan(0) && sourceVault) {
       const adminCategory = await tx.category.findUnique({ where: { code: "EXP_ADMIN_TAX" } });
       const liveVault = await tx.vault.findUnique({ where: { id: sourceVault.id } });
-      let newSourceBalance = toDecimal(liveVault.currentBalance);
-      if (!isBackdated) {
-        newSourceBalance = subMoney(liveVault.currentBalance, taxDec);
-        await tx.vault.update({
-          where: { id: sourceVault.id },
-          data: { currentBalance: roundMoney(newSourceBalance) },
-        });
-      }
 
       const childTx = await tx.transaction.create({
         data: {
@@ -759,8 +908,11 @@ export async function createTransaction(payload) {
           priorityTier: "SEKUNDER",
           partyId: party.id,
           parentTransactionId: createdTx.id,
-          grossAmount: taxDec,
-          consumeAmount: taxDec.negated(),
+          currency: entryCurrency,
+          originalGrossAmount: isForeignEntry ? entryTaxDec : null,
+          fxRateApplied: fxInfo.rateDec,
+          grossAmount: taxBaseDec,
+          consumeAmount: taxBaseDec.negated(),
           incomeAmount: toDecimal(0),
           isBackdated,
           linkedCheckpointId: linkedCheckpoint ? linkedCheckpoint.id : null,
@@ -768,18 +920,26 @@ export async function createTransaction(payload) {
         },
       });
 
-      await tx.transactionLeg.create({
-        data: {
-          transactionId: childTx.id,
-          vaultId: sourceVault.id,
-          legRole: "ADMIN_FEE",
-          debitIn: toDecimal(0),
-          creditOut: taxDec,
-          netMutation: taxDec.negated(),
-          runningVaultBalance: roundMoney(newSourceBalance),
-          runningTotalWealth: roundMoney(newSourceBalance),
-        },
+      await applyVaultLegMutation({
+        vaultObj: liveVault,
+        subObj: sourceSubContainer,
+        legRole: "ADMIN_FEE",
+        signedEntryDelta: entryTaxDec.negated(),
+        baseAbsDec: taxBaseDec,
+        legCurrency: entryCurrency,
+        rateDec: fxInfo.rateDec,
+        skipAbsorption: isBackdated,
+        txRef: childTx,
       });
+    }
+
+    // Flag partition warning on Transaction header if spillover detected
+    if (txSubVaultWarning) {
+      await tx.transaction.update({
+        where: { id: createdTx.id },
+        data: { subVaultWarning: true },
+      });
+      createdTx.subVaultWarning = true;
     }
 
     // 4. Update Habit Stats if triggered from an Action Card
@@ -1056,6 +1216,9 @@ export async function offsetPartyDebts({
 export async function deleteAndReverseTransaction(txId) {
   return await prisma.$transaction(async (tx) => {
     const id = parseInt(txId, 10);
+    const settings = await getOrCreateAppSettings(tx);
+    const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
+
     const transaction = await tx.transaction.findUnique({
       where: { id },
       include: {
@@ -1067,12 +1230,14 @@ export async function deleteAndReverseTransaction(txId) {
 
     if (!transaction) throw new Error("Transaction not found");
 
-    // Reverse live vault mutations ONLY if transaction was not absorbed as backdated
-    if (!transaction.isBackdated) {
-      for (const leg of transaction.legs) {
+    const affectedPartitionVaultIds = new Set();
+
+    const reverseSingleLeg = async (leg) => {
+      const netMutDec = toDecimal(leg.netMutation);
+      if (!netMutDec.isZero()) {
         const vault = await tx.vault.findUnique({ where: { id: leg.vaultId } });
         if (vault) {
-          const restored = subMoney(vault.currentBalance, leg.netMutation);
+          const restored = subMoney(vault.currentBalance, netMutDec);
           await tx.vault.update({
             where: { id: vault.id },
             data: { currentBalance: roundMoney(restored) },
@@ -1080,16 +1245,32 @@ export async function deleteAndReverseTransaction(txId) {
         }
       }
 
+      if (leg.subContainerId) {
+        const sub = await tx.vaultSubContainer.findUnique({ where: { id: leg.subContainerId } });
+        if (sub) {
+          const subDelta =
+            leg.originalMutation !== null && leg.originalMutation !== undefined
+              ? toDecimal(leg.originalMutation)
+              : netMutDec;
+          const restoredSub = subMoney(sub.currentBalance, subDelta);
+          await tx.vaultSubContainer.update({
+            where: { id: sub.id },
+            data: { currentBalance: roundMoney(restoredSub) },
+          });
+          affectedPartitionVaultIds.add(leg.vaultId);
+        }
+      }
+    };
+
+    // Reverse live vault & sub-vault mutations ONLY if transaction was not absorbed as backdated
+    if (!transaction.isBackdated) {
+      for (const leg of transaction.legs) {
+        await reverseSingleLeg(leg);
+      }
+
       for (const child of transaction.childTransactions) {
         for (const cLeg of child.legs) {
-          const vault = await tx.vault.findUnique({ where: { id: cLeg.vaultId } });
-          if (vault) {
-            const restored = subMoney(vault.currentBalance, cLeg.netMutation);
-            await tx.vault.update({
-              where: { id: vault.id },
-              data: { currentBalance: roundMoney(restored) },
-            });
-          }
+          await reverseSingleLeg(cLeg);
         }
         await tx.transaction.delete({ where: { id: child.id } });
       }
@@ -1136,6 +1317,10 @@ export async function deleteAndReverseTransaction(txId) {
 
     for (const pId of affectedPartyIds) {
       await recomputePartyBalances(tx, pId);
+    }
+
+    for (const vId of affectedPartitionVaultIds) {
+      await evaluateBasePartitionState(tx, vId, baseCurrency);
     }
 
     await recalculateLedgerRunningBalances(tx);

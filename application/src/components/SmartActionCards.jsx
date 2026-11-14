@@ -21,7 +21,6 @@ import {
   Collapse,
 } from "@mui/material";
 import FlashOnIcon from "@mui/icons-material/FlashOn";
-import AddIcon from "@mui/icons-material/Add";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
@@ -47,6 +46,7 @@ export default function SmartActionCards({
   parties = [],
   defaultMonthlyVaultId = null,
   defaultCashVaultId = null,
+  baseCurrency = "IDR",
 }) {
   const queryClient = useQueryClient();
   const {
@@ -194,6 +194,13 @@ export default function SmartActionCards({
         severity: "success",
         undoTransactionId: createdTx.id,
       });
+
+      if (createdTx?.subVaultWarning) {
+        enqueueToast(
+          `Warning: "${vars.title}" crossed into synced sub-vault splits for that vault.`,
+          { severity: "warning" }
+        );
+      }
     },
     onError: (err) => {
       enqueueToast(err.message, { severity: "error" });
@@ -258,6 +265,15 @@ export default function SmartActionCards({
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
+    const selectedSubObj =
+      selectedVaultObj && selectedVaultId === card.defaultVaultId && card.defaultSubContainerId
+        ? selectedVaultObj.subContainers?.find((sc) => sc.id === card.defaultSubContainerId) ||
+          card.defaultSubContainer ||
+          null
+        : null;
+    const selectedSubId = selectedSubObj?.id || null;
+    const effectiveCurrency = selectedSubObj?.currency || baseCurrency;
+
     executeCardMutation.mutate({
       title: card.title,
       nature: card.cardActionType || "EXPENSE",
@@ -267,7 +283,10 @@ export default function SmartActionCards({
       partyId: card.defaultPartyId || selfPartyId,
       actionCardId: card.id,
       sourceVaultId: selectedVaultId,
-      targetVaultId: card.targetVaultId,
+      sourceSubContainerId: selectedSubId,
+      targetVaultId: card.targetVaultId || null,
+      targetSubContainerId: card.targetSubContainerId || null,
+      currency: effectiveCurrency,
       grossAmount: effectiveAmount,
       taxFeeAmount: Number(taxOverrides[card.id]) || 0,
       coinUsedAmount: coinUsedVal,
@@ -301,15 +320,6 @@ export default function SmartActionCards({
             sx={{ fontSize: "0.75rem", fontWeight: 700, borderColor: "#CBD5E1", color: "#334155" }}
           >
             Manage Cards
-          </Button>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => openTransactionDialog(null)}
-            sx={{ fontSize: "0.75rem", fontWeight: 700 }}
-          >
-            Custom Tx
           </Button>
         </Stack>
       </Box>
@@ -397,6 +407,13 @@ export default function SmartActionCards({
             {(viewTab === 0 ? displayedCards.slice(0, visibleRecommendedCount) : displayedCards).map((card) => {
               const activeVaultId = vaultOverrides[card.id] || getDefaultCardVaultId(card);
               const activeVaultObj = vaults.find((v) => v.id === activeVaultId);
+              const activeSubObj =
+                activeVaultId === card.defaultVaultId && card.defaultSubContainerId
+                  ? activeVaultObj?.subContainers?.find((sc) => sc.id === card.defaultSubContainerId) ||
+                    card.defaultSubContainer ||
+                    null
+                  : null;
+              const cardCurrency = activeSubObj?.currency || baseCurrency;
               const isCashExpense =
                 (card.cardActionType || "EXPENSE") === "EXPENSE" &&
                 isPhysicalCashVault(activeVaultObj);
@@ -471,7 +488,12 @@ export default function SmartActionCards({
                             sx={{ display: "block", cursor: "pointer" }}
                           >
                             {card.defaultCategory?.name || card.cardActionType}
-                            {card.targetVault ? ` → ${card.targetVault.name}` : ""}
+                            {activeSubObj ? ` • ${activeSubObj.name}` : ""}
+                            {card.targetVault
+                              ? ` → ${card.targetVault.name}${
+                                  card.targetSubContainer ? ` (${card.targetSubContainer.name})` : ""
+                                }`
+                              : ""}
                           </Typography>
                         </Box>
 
@@ -529,7 +551,11 @@ export default function SmartActionCards({
                           {card.cardActionType === "TRANSFER" && card.targetVault && (
                             <Chip
                               icon={<ArrowForwardIcon sx={{ fontSize: "0.75rem !important" }} />}
-                              label={card.targetVault.name}
+                              label={
+                                card.targetSubContainer
+                                  ? `${card.targetVault.name} (${card.targetSubContainer.name})`
+                                  : card.targetVault.name
+                              }
                               size="small"
                               color="info"
                               variant="outlined"
@@ -546,7 +572,7 @@ export default function SmartActionCards({
                           return (
                             <Chip
                               key={amt}
-                              label={<MoneyValue value={amt} />}
+                              label={<MoneyValue value={amt} currency={cardCurrency} />}
                               size="small"
                               clickable
                               onClick={() => setAmountOverrides((prev) => ({ ...prev, [card.id]: Number(amt) }))}
@@ -578,13 +604,36 @@ export default function SmartActionCards({
 
                       {/* Inline Manual Amount Field (Hidden by default behind Custom chip per #1) */}
                       <Collapse in={isCustomOpen} timeout="auto" unmountOnExit>
-                        <CurrencyTextField
-                          label={defaultAmt > 0 ? "Custom Amount (or use default)" : "Enter Amount"}
-                          placeholder={defaultAmt > 0 ? String(defaultAmt) : "0"}
-                          value={overrideAmt ?? ""}
-                          onValueChange={(num) => setAmountOverrides((prev) => ({ ...prev, [card.id]: num }))}
-                          showClear
-                        />
+                        {cardCurrency === baseCurrency ? (
+                          <CurrencyTextField
+                            label={defaultAmt > 0 ? "Custom Amount (or use default)" : "Enter Amount"}
+                            placeholder={defaultAmt > 0 ? String(defaultAmt) : "0"}
+                            value={overrideAmt ?? ""}
+                            onValueChange={(num) => setAmountOverrides((prev) => ({ ...prev, [card.id]: num }))}
+                            showClear
+                          />
+                        ) : (
+                          <TextField
+                            label={
+                              defaultAmt > 0
+                                ? `Custom Amount (${cardCurrency})`
+                                : `Enter Amount (${cardCurrency})`
+                            }
+                            type="number"
+                            size="small"
+                            fullWidth
+                            inputProps={{ step: "any", min: 0 }}
+                            InputProps={{
+                              startAdornment: (
+                                <InputAdornment position="start" sx={{ fontWeight: 700 }}>
+                                  {cardCurrency}
+                                </InputAdornment>
+                              ),
+                            }}
+                            value={overrideAmt ?? ""}
+                            onChange={(e) => setAmountOverrides((prev) => ({ ...prev, [card.id]: e.target.value }))}
+                          />
+                        )}
                       </Collapse>
 
                       {/* Optional Tax / Cash Coin Options (Coin hidden unless Physical CASH selected per #4) */}
@@ -650,7 +699,7 @@ export default function SmartActionCards({
                           {effectiveAmt > 0 ? (
                             <Stack direction="row" spacing={0.5} alignItems="center">
                               <span>Pay</span>
-                              <MoneyValue value={effectiveAmt} />
+                              <MoneyValue value={effectiveAmt} currency={cardCurrency} />
                             </Stack>
                           ) : (
                             "Enter Amount"

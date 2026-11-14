@@ -31,8 +31,23 @@ export function isSelectableSpendVault(vault) {
 
 export function sortVaultsByBalanceDesc(vaults = []) {
   return [...vaults].sort((a, b) => {
-    const diff = Number(b.currentBalance || 0) - Number(a.currentBalance || 0);
+    const aBal = Number(a.totalEstimatedBase ?? a.currentBalance ?? 0);
+    const bBal = Number(b.totalEstimatedBase ?? b.currentBalance ?? 0);
+    const diff = bBal - aBal;
     if (diff !== 0) return diff;
     return (a.sortOrder || 0) - (b.sortOrder || 0);
   });
+}
+
+/**
+ * Derive crisp 1-2 character uppercase initials from a Vault name (e.g. "Bank Nobu" -> "BN")
+ */
+export function getVaultInitials(name = "") {
+  const words = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return "V";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0] || ""}${words[1][0] || ""}`.toUpperCase();
 }

@@ -2,6 +2,8 @@
 
 import React, { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import ThemeRegistry from "./ThemeRegistry/ThemeRegistry";
 
 export default function Providers({ children }) {
@@ -19,7 +21,9 @@ export default function Providers({ children }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeRegistry>{children}</ThemeRegistry>
+      <LocalizationProvider dateAdapter={AdapterDayjs}>
+        <ThemeRegistry>{children}</ThemeRegistry>
+      </LocalizationProvider>
     </QueryClientProvider>
   );
 }

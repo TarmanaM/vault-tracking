@@ -34,10 +34,14 @@ model Vault {
   name              String
   vaultType         String   // BANK, EWALLET, PHYSICAL_CASH, PHYSICAL_COIN, HELD_POOL, LIABILITY_CREDIT_LINE
   currentBalance    Decimal  @default(0)
-  hasSubContainers  Boolean  @default(false) // True for CASH (e.g. D1, D2 wallets)
+  hasSubContainers  Boolean  @default(false) // True when vault uses sub-vault partitions (e.g. D1/D2 or custom pockets)
   hasDenominations  Boolean  @default(false) // True for COIN (e.g. 1000, 500, 200, 100 denominations)
+  symbolMode        String   @default("INITIALS") // INITIALS, ICON, IMAGE
   iconName          String?
+  profileImageUrl   String?  // Served from /api/media/vaults/... stored in data-server/media/vaults/
   colorHex          String?
+  subVaultOutOfSync Boolean  @default(false) // Warning flag when sub-vault partitions drift from parent balance
+  subVaultSyncNote  String?
   sortOrder         Int      @default(0)
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
@@ -54,17 +58,26 @@ model Vault {
   @@map("vaults")
 }
 
-// Sub-containers for physical cash (e.g. D1 Wallet, D2 Reserve Wallet)
+// Sub-vault partitions for any vault (supports multi-currency pockets and default routing)
 model VaultSubContainer {
   id                 Int      @id @default(autoincrement())
   vaultId            Int
-  code               String   // D1, D2
+  code               String   // D1, D2, SUB_1, USD_MAIN, etc.
   name               String
-  lastCountedBalance Decimal  @default(0)
+  currency           String   @default("IDR") // ISO 4217 currency code (e.g. IDR, USD, SGD)
+  isDefault          Boolean  @default(false) // Fallback sub-vault when no pocket is explicitly chosen
+  currentBalance     Decimal  @default(0)     // Live balance in this sub-vault's native currency
+  lastCountedBalance Decimal  @default(0)     // Last synced/reconciled partition anchor
+  isSynced           Boolean  @default(false) // True once explicitly synced or auto-derived in a 2-pocket split
+  colorHex           String?
+  sortOrder          Int      @default(0)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  vault              Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  vault              Vault            @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  transactionLegs    TransactionLeg[]
+  actionCards        ActionCard[]     @relation("ActionCardDefaultSubContainer")
+  targetActionCards  ActionCard[]     @relation("ActionCardTargetSubContainer")
 
   @@unique([vaultId, code])
   @@map("vault_sub_containers")
@@ -136,23 +149,27 @@ model ActionCard {
   title              String    // "Parkir Kantor", "Beli Bensin Skupi", "Kopi Americano FM"
   subtitle           String?   // "Rp 12.000 • BANK NOBU"
   cardActionType     String    // EXPENSE, INCOME, TRANSFER, RECEIVABLE_LEND, RECEIVABLE_COLLECT, SPLIT_CHANGE
-  defaultVaultId     Int?
-  targetVaultId      Int?
-  defaultCategoryId  Int?
-  defaultPartyId     Int?
-  defaultAmount      Decimal?  // Fixed default amount, e.g. 12000
-  quickAmountsJson   String?   // JSON array of amount chips e.g. "[12000, 15000]" or "[30000, 38000, 50000]"
-  oneTapSubmit       Boolean   @default(false) // 1-tap submit with 5s undo snackbar
-  expectedCadence    String?   // DAILY_WORKDAY, DAILY_ANY, WEEKLY, MONTHLY, ON_DEMAND
-  pinPriority        Int       @default(0) // Higher number appears first
-  visibilityMode     String    @default("ACTIVE") // ACTIVE, SOFT_HIDDEN, ARCHIVED
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  defaultVaultId        Int?
+  defaultSubContainerId Int?
+  targetVaultId         Int?
+  targetSubContainerId  Int?
+  defaultCategoryId     Int?
+  defaultPartyId        Int?
+  defaultAmount        Decimal?  // Fixed default amount, e.g. 12000
+  quickAmountsJson     String?   // JSON array of amount chips e.g. "[12000, 15000]" or "[30000, 38000, 50000]"
+  oneTapSubmit         Boolean   @default(false) // 1-tap submit with 5s undo snackbar
+  expectedCadence      String?   // DAILY_WORKDAY, DAILY_ANY, WEEKLY, MONTHLY, ON_DEMAND
+  pinPriority          Int       @default(0) // Higher number appears first
+  visibilityMode       String    @default("ACTIVE") // ACTIVE, SOFT_HIDDEN, ARCHIVED
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   // Relations
-  defaultVault       Vault?             @relation("ActionCardDefaultVault", fields: [defaultVaultId], references: [id], onDelete: SetNull)
-  targetVault        Vault?             @relation("ActionCardTargetVault", fields: [targetVaultId], references: [id], onDelete: SetNull)
+  defaultVault         Vault?             @relation("ActionCardDefaultVault", fields: [defaultVaultId], references: [id], onDelete: SetNull)
+  defaultSubContainer  VaultSubContainer? @relation("ActionCardDefaultSubContainer", fields: [defaultSubContainerId], references: [id], onDelete: SetNull)
+  targetVault          Vault?             @relation("ActionCardTargetVault", fields: [targetVaultId], references: [id], onDelete: SetNull)
+  targetSubContainer   VaultSubContainer? @relation("ActionCardTargetSubContainer", fields: [targetSubContainerId], references: [id], onDelete: SetNull)
   defaultCategory    Category?          @relation(fields: [defaultCategoryId], references: [id], onDelete: SetNull)
   defaultParty       Party?             @relation(fields: [defaultPartyId], references: [id], onDelete: SetNull)
   habitStats         CardHabitStats?
@@ -241,10 +258,14 @@ model Transaction {
   partyId                 Int
   actionCardId            Int?
   parentTransactionId     Int?      // Links tax/fee split row to the primary transaction
-  grossAmount             Decimal
+  currency                String    @default("IDR") // Entry currency ISO 4217 code
+  originalGrossAmount     Decimal?  // Exact amount in entry currency (if foreign currency)
+  fxRateApplied           Decimal   @default(1)     // Snapshot multiplier to base currency at entry time
+  grossAmount             Decimal   // Base currency (IDR) locked gross amount
   consumeAmount           Decimal   // (-) For self consumption expenses, (0) for transfer/debt/initial
   incomeAmount            Decimal   // (+) For true personal income, (0) otherwise
   isBackdated             Boolean   @default(false)
+  subVaultWarning         Boolean   @default(false) // Flagged when sub-vault partition bypassed or drifted out of sync
   linkedCheckpointId      Int?      // References checkpoint if this transaction absorbed initial fund or explained lost cash
   counterpartyAccountNote String?   // Optional external bank or e-wallet note belonging to counterparty
   proofFilePath           String?   // Local file path for uploaded receipt
@@ -271,21 +292,27 @@ model Transaction {
 // 9. TRANSACTION LEGS (MULTI-VAULT MUTATIONS)
 // ==========================================
 model TransactionLeg {
-  id                   Int         @id @default(autoincrement())
+  id                   Int                @id @default(autoincrement())
   transactionId        Int
   vaultId              Int
-  legRole              String      // PRIMARY, TRANSFER_TARGET, COIN_CHANGE, ADMIN_FEE
-  debitIn              Decimal     @default(0) // Inflow (+)
-  creditOut            Decimal     @default(0) // Outflow (-)
-  netMutation          Decimal     // debitIn - creditOut
-  runningVaultBalance  Decimal     // Running balance of this specific vault
-  runningTotalWealth   Decimal     // Running balance of total aggregate wealth across all vaults
+  subContainerId       Int?
+  legRole              String             // PRIMARY, TRANSFER_TARGET, COIN_CHANGE, ADMIN_FEE
+  currency             String             @default("IDR")
+  fxRateApplied        Decimal            @default(1)
+  originalMutation     Decimal?           // Signed delta in the leg's native currency
+  debitIn              Decimal            @default(0) // Inflow (+) in base currency
+  creditOut            Decimal            @default(0) // Outflow (-) in base currency
+  netMutation          Decimal            // debitIn - creditOut in base currency
+  runningVaultBalance  Decimal            // Running balance of this specific vault
+  runningTotalWealth   Decimal            // Running balance of total aggregate wealth across all vaults
 
-  transaction          Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  vault                Vault       @relation(fields: [vaultId], references: [id])
+  transaction          Transaction        @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  vault                Vault              @relation(fields: [vaultId], references: [id])
+  subContainer         VaultSubContainer? @relation(fields: [subContainerId], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
   @@index([vaultId])
+  @@index([subContainerId])
   @@map("transaction_legs")
 }
 
@@ -339,4 +366,37 @@ model PendingReminder {
   convertedTransaction Transaction? @relation(fields: [convertedTransactionId], references: [id], onDelete: SetNull)
 
   @@map("pending_reminders")
+}
+
+// ==========================================
+// 12. APPLICATION SETTINGS (BASE CURRENCY & FX SCHEDULE)
+// ==========================================
+model AppSetting {
+  id                           Int       @id @default(1)
+  baseCurrency                 String    @default("IDR")
+  fxSyncIntervalDays           Int       @default(3)
+  lastFxSyncedAt               DateTime?
+  lastFxStatus                 String?   // OK, ERROR
+  lastFxError                  String?
+  dismissedCardSuggestionsJson String    @default("[]") // JSON array of "NATURE::normalizedTitle" keys muted by user
+  updatedAt                    DateTime  @updatedAt
+
+  @@map("app_settings")
+}
+
+// ==========================================
+// 13. CACHED EXCHANGE RATES (FRANKFURTER V2)
+// ==========================================
+model ExchangeRateCache {
+  id            Int      @id @default(autoincrement())
+  baseCurrency  String   // Source/foreign currency ISO 4217 (e.g. USD)
+  quoteCurrency String   // Target/base currency ISO 4217 (e.g. IDR)
+  rate          Decimal  // 1 baseCurrency = rate quoteCurrency
+  rateDate      String   // Observation date YYYY-MM-DD from provider
+  source        String   @default("FRANKFURTER_V2") // FRANKFURTER_V2, MANUAL
+  fetchedAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([baseCurrency, quoteCurrency])
+  @@map("exchange_rate_cache")
 }

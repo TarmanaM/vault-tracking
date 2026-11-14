@@ -1,10 +1,49 @@
-// API Route: DELETE /api/transactions/[id]
-// Reverses a transaction atomically using ledgerService (5s Undo & Ledger Delete)
+// API Route: GET & DELETE /api/transactions/[id]
+// Fetches single transaction details or reverses a transaction atomically using ledgerService
 
 import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
 import { deleteAndReverseTransaction } from "@/lib/ledgerService";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(request, { params }) {
+  try {
+    const { id } = await params;
+    const txId = parseInt(id, 10);
+    if (!Number.isInteger(txId) || txId <= 0) {
+      return NextResponse.json({ success: false, error: "Invalid transaction id" }, { status: 400 });
+    }
+
+    const tx = await prisma.transaction.findUnique({
+      where: { id: txId },
+      include: {
+        category: true,
+        party: true,
+        actionCard: true,
+        legs: {
+          include: {
+            vault: true,
+            subContainer: true,
+          },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!tx) {
+      return NextResponse.json({ success: false, error: "Transaction not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, data: tx });
+  } catch (error) {
+    console.error("Error in GET /api/transactions/[id]:", error);
+    return NextResponse.json(
+      { success: false, error: error.message || "Failed to fetch transaction" },
+      { status: 500 }
+    );
+  }
+}
 
 export async function DELETE(request, { params }) {
   try {

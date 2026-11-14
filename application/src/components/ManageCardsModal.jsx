@@ -37,12 +37,15 @@ const CARD_TYPES = [
   { value: "TRANSFER", label: "Vault Transfer" },
   { value: "INCOME", label: "Income / Top Up" },
   { value: "RECEIVABLE_LEND", label: "Lend / Talangi" },
+  { value: "RECEIVABLE_COLLECT", label: "Collect Receivable" },
   { value: "PAYABLE_BORROW", label: "I Borrow / Ditalangi" },
+  { value: "PAYABLE_REPAY", label: "Repay Debt / PayLater" },
 ];
 
 const CADENCE_OPTIONS = [
   { value: "ON_DEMAND", label: "On Demand" },
-  { value: "DAILY", label: "Daily Habit" },
+  { value: "DAILY_WORKDAY", label: "Daily (Workdays)" },
+  { value: "DAILY_ANY", label: "Daily (Every Day)" },
   { value: "WEEKLY", label: "Weekly Habit" },
   { value: "MONTHLY", label: "Monthly Bill" },
 ];
@@ -56,12 +59,15 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
   const [editTitle, setEditTitle] = useState("");
   const [editAmount, setEditAmount] = useState("");
   const [editVaultId, setEditVaultId] = useState("");
+  const [editSubId, setEditSubId] = useState("");
 
   // New Card form state
   const [newTitle, setNewTitle] = useState("");
   const [newType, setNewType] = useState("EXPENSE");
   const [newVaultId, setNewVaultId] = useState("");
+  const [newSubId, setNewSubId] = useState("");
   const [newTargetVaultId, setNewTargetVaultId] = useState("");
+  const [newTargetSubId, setNewTargetSubId] = useState("");
   const [newCategoryId, setNewCategoryId] = useState("");
   const [newPartyId, setNewPartyId] = useState("");
   const [newDefaultAmount, setNewDefaultAmount] = useState("");
@@ -121,6 +127,7 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
       setNewTitle("");
       setNewDefaultAmount("");
       setNewQuickAmounts("");
+      setNewTargetSubId("");
       setErrorMsg("");
       setTab(0);
     },
@@ -134,6 +141,7 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
     setEditTitle(card.title || "");
     setEditAmount(card.defaultAmount ? Number(card.defaultAmount) : "");
     setEditVaultId(card.defaultVaultId || "");
+    setEditSubId(card.defaultSubContainerId || "");
   };
 
   const handleSaveEdit = (cardId) => {
@@ -143,6 +151,7 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
       title: editTitle.trim(),
       defaultAmount: editAmount === "" ? 0 : Number(editAmount),
       defaultVaultId: editVaultId || null,
+      defaultSubContainerId: editSubId || null,
     });
   };
 
@@ -162,7 +171,9 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
       title: newTitle.trim(),
       cardActionType: newType,
       defaultVaultId: newVaultId || null,
+      defaultSubContainerId: newSubId || null,
       targetVaultId: newType === "TRANSFER" ? newTargetVaultId || null : null,
+      targetSubContainerId: newType === "TRANSFER" ? newTargetSubId || null : null,
       defaultCategoryId: newCategoryId || null,
       defaultPartyId: newPartyId || null,
       defaultAmount: newDefaultAmount === "" ? 0 : Number(newDefaultAmount),
@@ -232,7 +243,10 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
                           size="small"
                           fullWidth
                           value={editVaultId}
-                          onChange={(e) => setEditVaultId(e.target.value)}
+                          onChange={(e) => {
+                            setEditVaultId(e.target.value);
+                            setEditSubId("");
+                          }}
                         >
                           <MenuItem value="">None</MenuItem>
                           {vaults.map((v) => (
@@ -241,6 +255,24 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
                             </MenuItem>
                           ))}
                         </TextField>
+
+                        {(vaults.find((v) => v.id === Number(editVaultId))?.subContainers || []).length > 0 && (
+                          <TextField
+                            select
+                            label="Default Sub-Vault (Optional)"
+                            size="small"
+                            fullWidth
+                            value={editSubId}
+                            onChange={(e) => setEditSubId(e.target.value)}
+                          >
+                            <MenuItem value="">Auto (Vault Default)</MenuItem>
+                            {(vaults.find((v) => v.id === Number(editVaultId))?.subContainers || []).map((sc) => (
+                              <MenuItem key={sc.id} value={sc.id}>
+                                {sc.name} ({sc.currency})
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        )}
                       </Stack>
                       <Stack direction="row" spacing={1} justifyContent="flex-end">
                         <Button size="small" color="inherit" onClick={() => setEditingCardId(null)}>
@@ -399,7 +431,10 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
                   size="small"
                   fullWidth
                   value={newVaultId}
-                  onChange={(e) => setNewVaultId(e.target.value)}
+                  onChange={(e) => {
+                    setNewVaultId(e.target.value);
+                    setNewSubId("");
+                  }}
                 >
                   <MenuItem value="">Select per tap</MenuItem>
                   {vaults.map((v) => (
@@ -409,22 +444,63 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
                   ))}
                 </TextField>
 
-                {newType === "TRANSFER" && (
+                {(vaults.find((v) => v.id === Number(newVaultId))?.subContainers || []).length > 0 && (
                   <TextField
                     select
-                    label="Target Vault"
+                    label="Default Sub-Vault (Optional)"
                     size="small"
                     fullWidth
-                    value={newTargetVaultId}
-                    onChange={(e) => setNewTargetVaultId(e.target.value)}
+                    value={newSubId}
+                    onChange={(e) => setNewSubId(e.target.value)}
                   >
-                    <MenuItem value="">Select target</MenuItem>
-                    {vaults.map((v) => (
-                      <MenuItem key={v.id} value={v.id}>
-                        {v.name}
+                    <MenuItem value="">Auto (Vault Default)</MenuItem>
+                    {(vaults.find((v) => v.id === Number(newVaultId))?.subContainers || []).map((sc) => (
+                      <MenuItem key={sc.id} value={sc.id}>
+                        {sc.name} ({sc.currency})
                       </MenuItem>
                     ))}
                   </TextField>
+                )}
+
+                {newType === "TRANSFER" && (
+                  <>
+                    <TextField
+                      select
+                      label="Target Vault"
+                      size="small"
+                      fullWidth
+                      value={newTargetVaultId}
+                      onChange={(e) => {
+                        setNewTargetVaultId(e.target.value);
+                        setNewTargetSubId("");
+                      }}
+                    >
+                      <MenuItem value="">Select target</MenuItem>
+                      {vaults.map((v) => (
+                        <MenuItem key={v.id} value={v.id}>
+                          {v.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    {(vaults.find((v) => v.id === Number(newTargetVaultId))?.subContainers || []).length > 0 && (
+                      <TextField
+                        select
+                        label="Target Sub-Vault (Optional)"
+                        size="small"
+                        fullWidth
+                        value={newTargetSubId}
+                        onChange={(e) => setNewTargetSubId(e.target.value)}
+                      >
+                        <MenuItem value="">Auto (Vault Default)</MenuItem>
+                        {(vaults.find((v) => v.id === Number(newTargetVaultId))?.subContainers || []).map((sc) => (
+                          <MenuItem key={sc.id} value={sc.id}>
+                            {sc.name} ({sc.currency})
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    )}
+                  </>
                 )}
               </Stack>
 

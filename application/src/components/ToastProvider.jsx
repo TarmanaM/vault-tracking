@@ -15,11 +15,12 @@ import {
   Slide,
 } from "@mui/material";
 import UndoIcon from "@mui/icons-material/Undo";
+import FlashOnIcon from "@mui/icons-material/FlashOn";
 import CloseIcon from "@mui/icons-material/Close";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-function ToastItem({ toast, onDismiss, onUndo, isUndoing }) {
+function ToastItem({ toast, onDismiss, onUndo, onPromoteCard, isUndoing }) {
   useEffect(() => {
     if (!toast.duration) return;
     const timer = setTimeout(() => {
@@ -44,6 +45,24 @@ function ToastItem({ toast, onDismiss, onUndo, isUndoing }) {
         }}
         action={
           <Stack direction="row" spacing={0.5} alignItems="center">
+            {toast.promoteTransaction && (
+              <Button
+                color="inherit"
+                size="small"
+                startIcon={<FlashOnIcon sx={{ fontSize: 15 }} />}
+                onClick={() => onPromoteCard(toast.promoteTransaction, toast.id)}
+                disabled={isUndoing}
+                sx={{
+                  color: "#34D399",
+                  fontWeight: 800,
+                  fontSize: "0.72rem",
+                  whiteSpace: "nowrap",
+                  "&:hover": { bgcolor: "rgba(52, 211, 153, 0.16)" },
+                }}
+              >
+                + CARD
+              </Button>
+            )}
             {toast.undoTransactionId && (
               <Button
                 color="inherit"
@@ -55,6 +74,7 @@ function ToastItem({ toast, onDismiss, onUndo, isUndoing }) {
                   color: "#38BDF8",
                   fontWeight: 800,
                   fontSize: "0.75rem",
+                  whiteSpace: "nowrap",
                   "&:hover": { bgcolor: "rgba(56, 189, 248, 0.15)" },
                 }}
               >
@@ -79,7 +99,8 @@ function ToastItem({ toast, onDismiss, onUndo, isUndoing }) {
  * In-house MUI Toast Queue & Global Confirm Dialog Provider (#14 & #20)
  */
 export default function ToastProvider() {
-  const { toasts, dismissToast, enqueueToast, confirmDialog, closeConfirmDialog } = useLedgerStore();
+  const { toasts, dismissToast, enqueueToast, confirmDialog, closeConfirmDialog, openPromoteCardDialog } =
+    useLedgerStore();
   const queryClient = useQueryClient();
   const [confirmBusy, setConfirmBusy] = useState(false);
 
@@ -109,6 +130,11 @@ export default function ToastProvider() {
 
   const handleUndo = (txId, toastId) => {
     undoMutation.mutate({ txId, toastId });
+  };
+
+  const handlePromoteCard = (txSnapshot, toastId) => {
+    dismissToast(toastId);
+    openPromoteCardDialog(txSnapshot);
   };
 
   const handleConfirmProceed = async () => {
@@ -147,6 +173,7 @@ export default function ToastProvider() {
               toast={t}
               onDismiss={dismissToast}
               onUndo={handleUndo}
+              onPromoteCard={handlePromoteCard}
               isUndoing={undoMutation.isPending}
             />
           ))}

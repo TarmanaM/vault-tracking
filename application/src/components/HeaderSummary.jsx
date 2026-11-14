@@ -18,7 +18,7 @@ import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import MoneyValue from "@/components/MoneyValue";
 import { useLedgerStore } from "@/store/useLedgerStore";
 
-export default function HeaderSummary({ summary }) {
+export default function HeaderSummary({ summary, baseCurrency = "IDR" }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const openReconcileDialog = useLedgerStore((s) => s.openReconcileDialog);
   const openExportDialog = useLedgerStore((s) => s.openExportDialog);
@@ -57,7 +57,7 @@ export default function HeaderSummary({ summary }) {
                 fontSize: { xs: "1.4rem", sm: "2rem" },
               }}
             >
-              <MoneyValue value={summary.netTotalWealth} includeCents allowTapToggle />
+              <MoneyValue value={summary.netTotalWealth} currency={baseCurrency} includeCents allowTapToggle />
             </Typography>
           </Box>
 
@@ -103,7 +103,7 @@ export default function HeaderSummary({ summary }) {
               Liquid Funds (Banks &amp; Cash)
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, color: "#10B981" }}>
-              <MoneyValue value={summary.liquidWealth} allowTapToggle />
+              <MoneyValue value={summary.liquidWealth} currency={baseCurrency} allowTapToggle />
             </Typography>
           </Box>
 
@@ -112,7 +112,7 @@ export default function HeaderSummary({ summary }) {
               Third-Party Receivables (Piutang)
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, color: "#38BDF8" }}>
-              <MoneyValue value={summary.totalReceivables} allowTapToggle />
+              <MoneyValue value={summary.totalReceivables} currency={baseCurrency} allowTapToggle />
             </Typography>
           </Box>
 
@@ -121,7 +121,7 @@ export default function HeaderSummary({ summary }) {
               Payables &amp; PayLater (Utang)
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, color: "#F87171" }}>
-              <MoneyValue value={summary.totalPayables} allowTapToggle />
+              <MoneyValue value={summary.totalPayables} currency={baseCurrency} allowTapToggle />
             </Typography>
           </Box>
 
@@ -131,7 +131,7 @@ export default function HeaderSummary({ summary }) {
                 Held Fund Pool (Taspen)
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 700, color: "#A78BFA" }}>
-                <MoneyValue value={summary.heldPoolWealth} allowTapToggle />
+                <MoneyValue value={summary.heldPoolWealth} currency={baseCurrency} allowTapToggle />
               </Typography>
             </Box>
           )}

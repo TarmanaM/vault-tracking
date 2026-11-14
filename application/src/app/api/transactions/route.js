@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { createTransaction } from "@/lib/ledgerService";
+import { evaluatePostSaveCardSuggestion } from "@/lib/cardPromotionService";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +85,7 @@ export async function GET(request) {
           party: true,
           actionCard: true,
           legs: {
-            include: { vault: true },
+            include: { vault: true, subContainer: true },
           },
           debtLedgerEntries: true,
           childTransactions: true,
@@ -124,9 +125,19 @@ export async function POST(request) {
     const body = await request.json();
     const result = await createTransaction(body);
 
+    let cardSuggestion = null;
+    if (!body?.actionCardId && result?.id) {
+      try {
+        cardSuggestion = await evaluatePostSaveCardSuggestion(result.id);
+      } catch (suggestErr) {
+        console.error("Post-save card suggestion evaluation warning:", suggestErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: result,
+      cardSuggestion,
     });
   } catch (error) {
     console.error("Error in POST /api/transactions:", error);

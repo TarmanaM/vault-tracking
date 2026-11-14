@@ -26,12 +26,16 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
+import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
+import LayersOutlinedIcon from "@mui/icons-material/LayersOutlined";
 import { useQuery } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import MoneyValue from "@/components/MoneyValue";
+import VaultAvatar from "@/components/VaultAvatar";
 
 export default function CheckpointsPage() {
-  const { openReconcileDialog } = useLedgerStore();
+  const { openReconcileDialog, openVaultProfileDialog, openSubVaultSyncDialog } = useLedgerStore();
   const [infoAnchor, setInfoAnchor] = useState(null);
   const [showAuditHistory, setShowAuditHistory] = useState(false);
 
@@ -63,6 +67,7 @@ export default function CheckpointsPage() {
 
   const vaults = data.vaults || [];
   const checkpoints = data.checkpoints || [];
+  const baseCurrency = data.baseCurrency || "IDR";
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 }, px: { xs: 1.5, sm: 3 } }}>
@@ -78,15 +83,26 @@ export default function CheckpointsPage() {
           </IconButton>
         </Stack>
 
-        <Button
-          variant="contained"
-          size="small"
-          startIcon={<SyncAltIcon />}
-          onClick={() => openReconcileDialog(null)}
-          sx={{ fontWeight: 700 }}
-        >
-          Audit &amp; Reconcile Vault
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<AddCircleOutlineIcon />}
+            onClick={() => openVaultProfileDialog(null)}
+            sx={{ fontWeight: 700 }}
+          >
+            + Add Vault
+          </Button>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<SyncAltIcon />}
+            onClick={() => openReconcileDialog(null)}
+            sx={{ fontWeight: 700 }}
+          >
+            Audit Vault
+          </Button>
+        </Stack>
       </Box>
 
       {/* Info Popover (Rule 11) */}
@@ -107,51 +123,89 @@ export default function CheckpointsPage() {
       </Typography>
       <Grid container spacing={{ xs: 1.25, sm: 2 }} sx={{ mb: { xs: 2.5, sm: 3.5 } }}>
         {vaults.map((v) => {
-          const isNegative = Number(v.currentBalance) < 0;
+          const pSum = v.partitionSummary;
+          const totalDisplay = pSum?.totalEstimatedBase ?? v.currentBalance;
+          const isNegative = Number(totalDisplay) < 0;
           return (
             <Grid size={{ xs: 12, sm: 6, md: 4 }} key={v.id}>
               <Card sx={{ height: "100%", borderTop: `3px solid ${v.colorHex || "#2563EB"}` }}>
                 <CardContent sx={{ p: { xs: 1.5, sm: 2 }, display: "flex", flexDirection: "column", height: "100%", gap: 0.75 }}>
-                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                      {v.name}
-                    </Typography>
-                    <Chip label={v.vaultType} size="small" sx={{ fontSize: "0.65rem", height: 20 }} />
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                      <VaultAvatar vault={v} size={32} />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 800 }} noWrap>
+                        {v.name}
+                      </Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      {v.subVaultOutOfSync && (
+                        <Chip label="Out of Sync" size="small" color="warning" sx={{ fontSize: "0.62rem", height: 20, fontWeight: 700 }} />
+                      )}
+                      <Chip label={v.vaultType} size="small" sx={{ fontSize: "0.65rem", height: 20 }} />
+                    </Stack>
                   </Box>
 
                   <Typography variant="h6" sx={{ fontWeight: 800, color: isNegative ? "#DC2626" : "#0F172A" }}>
-                    <MoneyValue value={v.currentBalance} includeCents allowTapToggle />
+                    <MoneyValue value={totalDisplay} currency={baseCurrency} includeCents allowTapToggle />
                   </Typography>
+
+                  {pSum?.hasForeignSubVaults && (
+                    <Typography variant="caption" color="text.secondary">
+                      Base Book: <MoneyValue value={v.currentBalance} currency={baseCurrency} forceExact />
+                    </Typography>
+                  )}
 
                   {v.subContainers && v.subContainers.length > 0 && (
                     <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                      {v.subContainers.map((sc) => (
-                        <Chip
-                          key={sc.id}
-                          size="small"
-                          label={
-                            <>
-                              {sc.code}: <MoneyValue value={sc.lastCountedBalance} />
-                            </>
-                          }
-                          sx={{ fontSize: "0.68rem", height: 22, bgcolor: "#F1F5F9" }}
-                        />
-                      ))}
+                      {v.subContainers.map((sc) => {
+                        const bal = sc.effectiveBalance ?? sc.currentBalance ?? sc.lastCountedBalance;
+                        return (
+                          <Chip
+                            key={sc.id}
+                            size="small"
+                            color={sc.isDefault ? "primary" : "default"}
+                            variant={sc.isDefault ? "outlined" : "filled"}
+                            label={
+                              <>
+                                {sc.name}: <MoneyValue value={bal} currency={sc.currency || baseCurrency} />
+                              </>
+                            }
+                            sx={{ fontSize: "0.68rem", height: 22, bgcolor: sc.isDefault ? "#EFF6FF" : "#F1F5F9" }}
+                          />
+                        );
+                      })}
                     </Stack>
                   )}
 
-                  <Box sx={{ mt: "auto", pt: 1 }}>
+                  <Stack direction="row" spacing={0.75} sx={{ mt: "auto", pt: 1 }}>
                     <Button
                       size="small"
                       variant="outlined"
-                      fullWidth
+                      startIcon={<EditOutlinedIcon />}
+                      onClick={() => openVaultProfileDialog(v)}
+                      sx={{ fontWeight: 700, fontSize: "0.72rem" }}
+                    >
+                      Profile
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<LayersOutlinedIcon />}
+                      onClick={() => openSubVaultSyncDialog(v.id)}
+                      sx={{ fontWeight: 700, fontSize: "0.72rem" }}
+                    >
+                      Pockets
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
                       startIcon={<SyncAltIcon />}
                       onClick={() => openReconcileDialog(v.id)}
-                      sx={{ fontWeight: 700 }}
+                      sx={{ fontWeight: 700, fontSize: "0.72rem", flexGrow: 1 }}
                     >
-                      Audit {v.name}
+                      Audit
                     </Button>
-                  </Box>
+                  </Stack>
                 </CardContent>
               </Card>
             </Grid>

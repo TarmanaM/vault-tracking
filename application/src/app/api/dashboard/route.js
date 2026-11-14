@@ -6,6 +6,12 @@ import prisma from "@/lib/prisma";
 import { calculateCardScore } from "@/lib/habitEngine";
 import { toDecimal, addMoney, subMoney, roundMoney } from "@/lib/money";
 import { isPhysicalCashVault, isSelectableSpendVault, sortVaultsByBalanceDesc } from "@/lib/vaultHelpers";
+import {
+  ensureFxRatesSyncedIfDue,
+  getOrCreateAppSettings,
+  getCachedRateMap,
+} from "@/lib/fxService";
+import { computeVaultPartitionSummary } from "@/lib/subVaultService";
 
 export const dynamic = "force-dynamic";
 
@@ -14,13 +20,31 @@ export async function GET() {
     const now = new Date();
     let currentMonthTag = `${now.toLocaleString("en-US", { month: "short" })},${now.getFullYear()}`;
 
-    // 1. Fetch all active vaults sorted descending by current balance (#5)
+    await ensureFxRatesSyncedIfDue();
+    const appSettings = await getOrCreateAppSettings();
+    const baseCurrency = String(appSettings.baseCurrency || "IDR").toUpperCase();
+    const rateMap = await getCachedRateMap(baseCurrency);
+
+    // 1. Fetch all active vaults with sub-vault FX enrichment sorted descending (#5)
     const rawVaults = await prisma.vault.findMany({
       where: { isActive: true },
-      include: { subContainers: true },
+      include: {
+        subContainers: {
+          orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
+        },
+      },
       orderBy: { sortOrder: "asc" },
     });
-    const vaults = sortVaultsByBalanceDesc(rawVaults);
+    const decoratedVaults = rawVaults.map((v) => {
+      const partitionSummary = computeVaultPartitionSummary(v, baseCurrency, rateMap);
+      return {
+        ...v,
+        subContainers: partitionSummary.subContainers,
+        partitionSummary,
+        totalEstimatedBase: partitionSummary.totalEstimatedBase,
+      };
+    });
+    const vaults = sortVaultsByBalanceDesc(decoratedVaults);
 
     // 2. Fetch all active parties with separate receivable/payable balances
     const rawParties = await prisma.party.findMany({
@@ -43,7 +67,9 @@ export async function GET() {
       where: { isActive: true },
       include: {
         defaultVault: true,
+        defaultSubContainer: true,
         targetVault: true,
+        targetSubContainer: true,
         defaultCategory: true,
         defaultParty: true,
         habitStats: true,
@@ -99,13 +125,13 @@ export async function GET() {
     );
     const archivedCards = scoredAllCards.filter((c) => c.visibilityMode === "ARCHIVED");
 
-    // 4. Compute Wealth Breakdown
+    // 4. Compute Wealth Breakdown (includes live mark-to-market foreign sub-vaults)
     let liquidWealth = toDecimal(0);
     let heldPoolWealth = toDecimal(0);
     let liabilityPayable = toDecimal(0);
 
     for (const v of vaults) {
-      const bal = toDecimal(v.currentBalance);
+      const bal = toDecimal(v.totalEstimatedBase ?? v.currentBalance);
       if (v.vaultType === "LIABILITY_CREDIT_LINE") {
         if (bal.lessThan(0)) {
           liabilityPayable = addMoney(liabilityPayable, bal.abs());
@@ -275,6 +301,8 @@ export async function GET() {
         latestCheckpointsByVault,
         pendingReminders,
         categories,
+        appSettings,
+        exchangeRates: rateMap,
       },
     });
   } catch (error) {

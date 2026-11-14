@@ -20,16 +20,19 @@ import {
   CircularProgress,
   Alert,
   InputAdornment,
+  Tooltip,
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import AddIcon from "@mui/icons-material/Add";
+import FlashOnIcon from "@mui/icons-material/FlashOn";
 import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toDecimal } from "@/lib/money";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import MoneyValue from "@/components/MoneyValue";
+import { isTransactionPromotable } from "@/lib/cardPromotionUtils";
 
 const PRESET_RANGES = [
   { value: "1M", label: "1M" },
@@ -60,6 +63,7 @@ export default function LedgerPage() {
     openExportDialog,
     openTransactionDialog,
     openConfirmDialog,
+    openPromoteCardDialog,
     enqueueToast,
   } = useLedgerStore();
 
@@ -156,7 +160,7 @@ export default function LedgerPage() {
             onClick={() => openTransactionDialog(null)}
             sx={{ fontWeight: 700 }}
           >
-            Custom Tx
+            + Transaction
           </Button>
         </Stack>
       </Box>
@@ -324,6 +328,25 @@ export default function LedgerPage() {
                               sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
                             />
                           )}
+                          {t.subVaultWarning && (
+                            <Chip
+                              label="Sub-Vault Drift"
+                              size="small"
+                              color="warning"
+                              variant="outlined"
+                              sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
+                            />
+                          )}
+                          {t.actionCardId != null && t.actionCard && (
+                            <Chip
+                              icon={<FlashOnIcon sx={{ fontSize: "0.72rem !important" }} />}
+                              label={`Card: ${t.actionCard.title}`}
+                              size="small"
+                              color="primary"
+                              variant="outlined"
+                              sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
+                            />
+                          )}
                         </Stack>
 
                         {t.category && (
@@ -364,13 +387,24 @@ export default function LedgerPage() {
                       <TableCell>
                         <Stack spacing={0.5}>
                           {t.legs && t.legs.length > 0 ? (
-                            t.legs.map((leg) => (
-                              <Typography key={leg.id} variant="caption" sx={{ display: "block", whiteSpace: "nowrap" }}>
-                                <strong>{leg.vault?.name}:</strong>{" "}
-                                {toDecimal(leg.netMutation).greaterThan(0) ? "+" : ""}
-                                <MoneyValue value={leg.netMutation} includeCents />
-                              </Typography>
-                            ))
+                            t.legs.map((leg) => {
+                              const baseCcy = dashboardData?.appSettings?.baseCurrency || "IDR";
+                              const legCcy = leg.currency || baseCcy;
+                              const isForeignLeg = legCcy !== baseCcy;
+                              const legDisplayVal = isForeignLeg
+                                ? leg.originalMutation ?? leg.netMutation
+                                : leg.netMutation;
+                              return (
+                                <Typography key={leg.id} variant="caption" sx={{ display: "block", whiteSpace: "nowrap" }}>
+                                  <strong>
+                                    {leg.vault?.name}
+                                    {leg.subContainer ? ` / ${leg.subContainer.name}` : ""}:
+                                  </strong>{" "}
+                                  {toDecimal(legDisplayVal).greaterThan(0) ? "+" : ""}
+                                  <MoneyValue value={legDisplayVal} currency={legCcy} includeCents />
+                                </Typography>
+                              );
+                            })
                           ) : (
                             <Typography variant="caption" color="text.secondary">
                               Non-vault (Debt/Offset)
@@ -380,7 +414,19 @@ export default function LedgerPage() {
                       </TableCell>
 
                       <TableCell align="right" sx={{ fontWeight: 800, whiteSpace: "nowrap" }}>
-                        <MoneyValue value={t.grossAmount} includeCents allowTapToggle />
+                        <MoneyValue
+                          value={t.grossAmount}
+                          currency={dashboardData?.appSettings?.baseCurrency || "IDR"}
+                          includeCents
+                          allowTapToggle
+                        />
+                        {t.originalGrossAmount &&
+                          t.currency &&
+                          t.currency !== (dashboardData?.appSettings?.baseCurrency || "IDR") && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.68rem" }}>
+                              <MoneyValue value={t.originalGrossAmount} currency={t.currency} includeCents />
+                            </Typography>
+                          )}
                       </TableCell>
 
                       <TableCell
@@ -395,22 +441,36 @@ export default function LedgerPage() {
                       </TableCell>
 
                       <TableCell align="center">
-                        <IconButton
-                          size="small"
-                          disabled={deleteTxMutation.isPending}
-                          onClick={() =>
-                            openConfirmDialog({
-                              title: "Reverse & Delete Transaction?",
-                              message: `Reverse transaction #${t.id} ("${t.title}")? This atomically restores affected vault balances, debt entries, and ledger snapshots.`,
-                              confirmLabel: "Reverse & Delete",
-                              confirmColor: "error",
-                              onConfirm: () => deleteTxMutation.mutateAsync(t.id),
-                            })
-                          }
-                          sx={{ color: "#94A3B8", "&:hover": { color: "#EF4444" } }}
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
+                        <Stack direction="row" spacing={0.25} justifyContent="center" alignItems="center">
+                          {isTransactionPromotable(t) && (
+                            <Tooltip title="Save as Action Card">
+                              <IconButton
+                                size="small"
+                                aria-label="Save as Action Card"
+                                onClick={() => openPromoteCardDialog(t)}
+                                sx={{ color: "#64748B", "&:hover": { color: "#0284C7" } }}
+                              >
+                                <FlashOnIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          <IconButton
+                            size="small"
+                            disabled={deleteTxMutation.isPending}
+                            onClick={() =>
+                              openConfirmDialog({
+                                title: "Reverse & Delete Transaction?",
+                                message: `Reverse transaction #${t.id} ("${t.title}")? This atomically restores affected vault balances, debt entries, and ledger snapshots.`,
+                                confirmLabel: "Reverse & Delete",
+                                confirmColor: "error",
+                                onConfirm: () => deleteTxMutation.mutateAsync(t.id),
+                              })
+                            }
+                            sx={{ color: "#94A3B8", "&:hover": { color: "#EF4444" } }}
+                          >
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   );

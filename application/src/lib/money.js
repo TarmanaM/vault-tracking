@@ -24,6 +24,12 @@ export function mulMoney(a, b) {
   return toDecimal(a).times(toDecimal(b));
 }
 
+export function divMoney(a, b) {
+  const divisor = toDecimal(b);
+  if (divisor.isZero()) return toDecimal(0);
+  return toDecimal(a).dividedBy(divisor);
+}
+
 export function roundMoney(val) {
   return toDecimal(val).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 }

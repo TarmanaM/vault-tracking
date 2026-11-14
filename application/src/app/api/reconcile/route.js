@@ -5,6 +5,12 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { toDecimal, subMoney, roundMoney } from "@/lib/money";
 import { recalculateLedgerRunningBalances } from "@/lib/ledgerService";
+import { getOrCreateAppSettings, getCachedRateMap } from "@/lib/fxService";
+import {
+  ensureDefaultSubContainer,
+  evaluateBasePartitionState,
+  computeVaultPartitionSummary,
+} from "@/lib/subVaultService";
 
 export const dynamic = "force-dynamic";
 
@@ -75,20 +81,38 @@ export async function POST(request) {
         }
       }
 
+      const settings = await getOrCreateAppSettings(tx);
+      const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
+
       if (subContainers && subContainers.length > 0) {
         for (const sc of subContainers) {
+          const balDec = roundMoney(sc.balance);
           await tx.vaultSubContainer.upsert({
             where: { vaultId_code: { vaultId: vault.id, code: sc.code } },
-            update: { lastCountedBalance: roundMoney(sc.balance) },
+            update: {
+              currentBalance: balDec,
+              lastCountedBalance: balDec,
+              isSynced: true,
+              ...(sc.currency ? { currency: String(sc.currency).toUpperCase() } : {}),
+            },
             create: {
               vaultId: vault.id,
               code: sc.code,
-              name: sc.name || `Dompet ${sc.code}`,
-              lastCountedBalance: roundMoney(sc.balance),
+              name: sc.name || `Pocket ${sc.code}`,
+              currency: sc.currency ? String(sc.currency).toUpperCase() : baseCurrency,
+              currentBalance: balDec,
+              lastCountedBalance: balDec,
+              isSynced: true,
             },
           });
         }
+        await tx.vault.update({
+          where: { id: vault.id },
+          data: { hasSubContainers: true },
+        });
       }
+
+      const defaultSub = await ensureDefaultSubContainer(tx, vault.id);
 
       // 3. Auto-Reconciliation Transaction if there is a discrepancy
       if (discrepancyDec.lessThan(0)) {
@@ -107,6 +131,8 @@ export async function POST(request) {
             priorityTier: "NONE",
             partyId: selfParty.id,
             linkedCheckpointId: checkpoint.id,
+            currency: baseCurrency,
+            fxRateApplied: 1,
             grossAmount: absDiff,
             consumeAmount: toDecimal(0),
             incomeAmount: toDecimal(0),
@@ -118,7 +144,11 @@ export async function POST(request) {
           data: {
             transactionId: reconTx.id,
             vaultId: vault.id,
+            subContainerId: defaultSub ? defaultSub.id : null,
             legRole: "PRIMARY",
+            currency: baseCurrency,
+            fxRateApplied: 1,
+            originalMutation: absDiff.negated(),
             debitIn: toDecimal(0),
             creditOut: absDiff,
             netMutation: absDiff.negated(),
@@ -141,6 +171,8 @@ export async function POST(request) {
             priorityTier: "NONE",
             partyId: selfParty.id,
             linkedCheckpointId: checkpoint.id,
+            currency: baseCurrency,
+            fxRateApplied: 1,
             grossAmount: discrepancyDec,
             consumeAmount: toDecimal(0),
             incomeAmount: discrepancyDec,
@@ -152,7 +184,11 @@ export async function POST(request) {
           data: {
             transactionId: reconTx.id,
             vaultId: vault.id,
+            subContainerId: defaultSub ? defaultSub.id : null,
             legRole: "PRIMARY",
+            currency: baseCurrency,
+            fxRateApplied: 1,
+            originalMutation: discrepancyDec,
             debitIn: discrepancyDec,
             creditOut: toDecimal(0),
             netMutation: discrepancyDec,
@@ -162,12 +198,13 @@ export async function POST(request) {
         });
       }
 
-      // 4. Update Vault's live balance and recalculate aggregate total wealth snapshots
+      // 4. Update Vault's live balance, evaluate partitions, and recalculate running balances
       await tx.vault.update({
         where: { id: vault.id },
         data: { currentBalance: countedDec },
       });
 
+      await evaluateBasePartitionState(tx, vault.id, baseCurrency);
       await recalculateLedgerRunningBalances(tx);
 
       return checkpoint;
@@ -188,7 +225,11 @@ export async function POST(request) {
 
 export async function GET() {
   try {
-    const [checkpoints, vaults] = await Promise.all([
+    const settings = await getOrCreateAppSettings();
+    const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
+    const rateMap = await getCachedRateMap(baseCurrency);
+
+    const [checkpoints, rawVaults] = await Promise.all([
       prisma.vaultCheckpoint.findMany({
         include: {
           vault: true,
@@ -200,16 +241,32 @@ export async function GET() {
       }),
       prisma.vault.findMany({
         where: { isActive: true },
-        include: { subContainers: true },
+        include: {
+          subContainers: {
+            orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
+          },
+        },
         orderBy: { sortOrder: "asc" },
       }),
     ]);
+
+    const vaults = rawVaults.map((v) => {
+      const partitionSummary = computeVaultPartitionSummary(v, baseCurrency, rateMap);
+      return {
+        ...v,
+        subContainers: partitionSummary.subContainers,
+        partitionSummary,
+        totalEstimatedBase: partitionSummary.totalEstimatedBase,
+      };
+    });
 
     return NextResponse.json({
       success: true,
       data: {
         checkpoints,
         vaults,
+        baseCurrency,
+        rateMap,
       },
     });
   } catch (error) {

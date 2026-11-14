@@ -65,8 +65,17 @@ export function calculateCardScore(card, now = new Date()) {
   const freqScore = Math.min(1.0, (stats.totalUses || 0) / 20);
 
   // 5. Cooldown Penalty (Anti-spam for single-use daily items)
+  // Temporarily grant a 24h New Card Spotlight when pinPriority >= 8 so promoted cards surface immediately
+  const createdAtDate = card.createdAt ? new Date(card.createdAt) : null;
+  const ageMs =
+    createdAtDate && !Number.isNaN(createdAtDate.getTime())
+      ? now.getTime() - createdAtDate.getTime()
+      : Infinity;
+  const isNewSpotlight =
+    ageMs >= -60000 && ageMs < 24 * 60 * 60 * 1000 && (card.pinPriority || 0) >= 8;
+
   let cooldownPenalty = 0;
-  if (stats.lastUsedDate) {
+  if (!isNewSpotlight && stats.lastUsedDate) {
     const lastDate = new Date(stats.lastUsedDate);
     const isSameDay =
       lastDate.getFullYear() === now.getFullYear() &&
@@ -86,10 +95,11 @@ export function calculateCardScore(card, now = new Date()) {
     0.15 * freqScore -
     cooldownPenalty;
 
-  // Add manual pin priority bonus (1-10 mapped to 0-20 points)
+  // Add manual pin priority bonus (1-10 mapped to 0-20 points) and temporary 24h spotlight boost
   const pinBonus = (card.pinPriority || 0) * 2;
+  const spotlightBonus = isNewSpotlight ? 25 : 0;
 
-  const finalScore = Math.max(0, Math.min(100, Math.round(rawScore * 80 + pinBonus)));
+  const finalScore = Math.max(0, Math.min(100, Math.round(rawScore * 80 + pinBonus + spotlightBonus)));
   return finalScore;
 }
 
@@ -124,6 +134,10 @@ export async function recordCardUsage(tx, cardId, amount, vaultId, now = new Dat
     }
   }
 
+  const existingLastDate = stats.lastUsedDate ? new Date(stats.lastUsedDate) : null;
+  const effectiveLastDate =
+    existingLastDate && existingLastDate.getTime() > now.getTime() ? existingLastDate : now;
+
   await tx.cardHabitStats.update({
     where: { cardId },
     data: {
@@ -131,10 +145,156 @@ export async function recordCardUsage(tx, cardId, amount, vaultId, now = new Dat
       hourCountsJson: JSON.stringify(hourCounts),
       dowCountsJson: JSON.stringify(dowCounts),
       avgIntervalDays: newAvgInterval,
-      lastUsedTimestamp: now,
-      lastUsedDate: now,
+      lastUsedTimestamp: effectiveLastDate,
+      lastUsedDate: effectiveLastDate,
       mostFrequentAmount: amount ? toDecimal(amount) : stats.mostFrequentAmount,
       mostFrequentVaultId: vaultId || stats.mostFrequentVaultId,
+    },
+  });
+}
+
+/**
+ * Resolve a Transaction's full local timestamp by combining transactionDate and "HH:mm" transactionTime.
+ * @param {Object} txRow Transaction record
+ * @returns {Date}
+ */
+export function resolveTransactionTimestamp(txRow) {
+  const base = txRow?.transactionDate ? new Date(txRow.transactionDate) : new Date(txRow?.createdAt || Date.now());
+  if (Number.isNaN(base.getTime())) return new Date();
+
+  if (typeof txRow?.transactionTime === "string") {
+    const match = txRow.transactionTime.trim().match(/^(\d{1,2}):(\d{2})/);
+    if (match) {
+      const hours = Math.min(23, Math.max(0, Number(match[1])));
+      const mins = Math.min(59, Math.max(0, Number(match[2])));
+      base.setHours(hours, mins, 0, 0);
+    }
+  }
+  return base;
+}
+
+/**
+ * Determine the primary vault ID associated with a transaction's legs.
+ * Prefers the PRIMARY leg role or outflow (negative netMutation) leg.
+ * @param {Object} txRow Transaction record with optional legs array
+ * @returns {number|null}
+ */
+export function resolvePrimaryVaultId(txRow) {
+  const legs = Array.isArray(txRow?.legs) ? txRow.legs : [];
+  if (legs.length === 0) return null;
+
+  const primaryLeg = legs.find((leg) => leg.vaultId != null && leg.legRole === "PRIMARY");
+  if (primaryLeg) return primaryLeg.vaultId;
+
+  const outLeg = legs.find(
+    (leg) => leg.vaultId != null && Number(leg.netMutation ?? leg.amount ?? 0) < 0
+  );
+  if (outLeg) return outLeg.vaultId;
+
+  const anyVaultLeg = legs.find((leg) => leg.vaultId != null);
+  return anyVaultLeg ? anyVaultLeg.vaultId : null;
+}
+
+/**
+ * Seed or rebuild CardHabitStats chronologically from an array of Transaction records (with legs).
+ * @param {Object} tx Prisma transaction client
+ * @param {number} cardId ActionCard ID
+ * @param {Array<Object>} transactions Matching Transaction records
+ * @param {number|null} preferredVaultId Fallback vault ID if no leg contains a vault
+ * @param {number|null} preferredAmount Fallback default amount
+ */
+export async function seedCardHabitStatsFromTransactions(
+  tx,
+  cardId,
+  transactions = [],
+  preferredVaultId = null,
+  preferredAmount = null
+) {
+  const hourCounts = new Array(24).fill(0);
+  const dowCounts = new Array(7).fill(0);
+  const timestamps = [];
+  const amountFreq = new Map();
+  const vaultFreq = new Map();
+
+  const sorted = [...transactions].sort(
+    (a, b) => resolveTransactionTimestamp(a).getTime() - resolveTransactionTimestamp(b).getTime()
+  );
+
+  for (const row of sorted) {
+    const ts = resolveTransactionTimestamp(row);
+    timestamps.push(ts);
+
+    const h = ts.getHours();
+    const jsDay = ts.getDay();
+    const dow = jsDay === 0 ? 6 : jsDay - 1;
+    hourCounts[h] = (hourCounts[h] || 0) + 1;
+    dowCounts[dow] = (dowCounts[dow] || 0) + 1;
+
+    const amtVal = row.originalGrossAmount ?? row.grossAmount;
+    if (amtVal != null) {
+      const amtKey = toDecimal(amtVal).toFixed(2);
+      amountFreq.set(amtKey, (amountFreq.get(amtKey) || 0) + 1);
+    }
+
+    const vId = resolvePrimaryVaultId(row);
+    if (vId != null) {
+      vaultFreq.set(vId, (vaultFreq.get(vId) || 0) + 1);
+    }
+  }
+
+  let avgIntervalDays = null;
+  let stdIntervalDays = null;
+  if (timestamps.length >= 2) {
+    const diffs = [];
+    for (let i = 1; i < timestamps.length; i += 1) {
+      const diff = Math.max(0, (timestamps[i].getTime() - timestamps[i - 1].getTime()) / (1000 * 60 * 60 * 24));
+      diffs.push(diff);
+    }
+    const mean = diffs.reduce((acc, d) => acc + d, 0) / diffs.length;
+    avgIntervalDays = mean;
+    if (diffs.length >= 2) {
+      const variance = diffs.reduce((acc, d) => acc + (d - mean) ** 2, 0) / diffs.length;
+      stdIntervalDays = Math.sqrt(variance);
+    }
+  }
+
+  let topAmount = preferredAmount != null ? toDecimal(preferredAmount) : null;
+  let topAmountCount = -1;
+  for (const [amtKey, count] of amountFreq.entries()) {
+    if (count > topAmountCount) {
+      topAmountCount = count;
+      topAmount = toDecimal(amtKey);
+    }
+  }
+
+  let topVaultId = preferredVaultId ?? null;
+  let topVaultCount = -1;
+  for (const [vId, count] of vaultFreq.entries()) {
+    if (count > topVaultCount) {
+      topVaultCount = count;
+      topVaultId = vId;
+    }
+  }
+
+  const lastTs = timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
+  const statsData = {
+    totalUses: sorted.length,
+    hourCountsJson: JSON.stringify(hourCounts),
+    dowCountsJson: JSON.stringify(dowCounts),
+    avgIntervalDays,
+    stdIntervalDays,
+    lastUsedTimestamp: lastTs,
+    lastUsedDate: lastTs,
+    mostFrequentAmount: topAmount,
+    mostFrequentVaultId: topVaultId,
+  };
+
+  return tx.cardHabitStats.upsert({
+    where: { cardId },
+    update: statsData,
+    create: {
+      cardId,
+      ...statsData,
     },
   });
 }

@@ -18,6 +18,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import { formatShortAxis, formatMoneyDisplay } from "@/lib/money";
 import MoneyValue from "@/components/MoneyValue";
+import {
+  useChartLabelVisibility,
+  ChartCardHeaderMenu,
+  ChartDotLabelMark,
+} from "@/components/ChartCardHeaderMenu";
 
 export default function AutoChartDrawer() {
   const { chartDrawer, closeChartDrawer, isPrivacyHidden } = useLedgerStore();
@@ -37,6 +42,15 @@ export default function AutoChartDrawer() {
 
   const moneyValueFormatter = (val) =>
     formatMoneyDisplay(val, { compact: false, hidden: isPrivacyHidden });
+
+  const cardPtsCount = data?.timeSeries?.length || 0;
+  const hourlyPtsCount = data?.hourlyData?.length || 0;
+  const vaultPtsCount = data?.balanceTimeline?.length || 0;
+
+  const { showLabels: showCardSpendLabels } = useChartLabelVisibility(`drawer-${type}-${id}-spend`, cardPtsCount);
+  const { showLabels: showCardHourlyLabels } = useChartLabelVisibility(`drawer-${type}-${id}-hourly`, hourlyPtsCount);
+  const { showLabels: showVaultLabels } = useChartLabelVisibility(`drawer-${type}-${id}-vault`, vaultPtsCount);
+  const { showLabels: showLayerLabels } = useChartLabelVisibility(`drawer-${type}-${id}-layer`, cardPtsCount);
 
   return (
     <Drawer
@@ -88,18 +102,27 @@ export default function AutoChartDrawer() {
           {type === "CARD" && (
             <Stack spacing={3}>
               <Box>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                  Spending History (Total Uses: {data.totalUses || 0})
-                </Typography>
+                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Spending History (Total Uses: {data.totalUses || 0})
+                  </Typography>
+                  <ChartCardHeaderMenu chartKey={`drawer-${type}-${id}-spend`} pointCount={cardPtsCount} />
+                </Box>
                 {data.timeSeries && data.timeSeries.length > 0 ? (
                   <Box sx={{ width: "100%", minWidth: 0, height: 260 }}>
                     <BarChart
                       xAxis={[{ scaleType: "band", data: data.timeSeries.map((t) => t.date) }]}
                       yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                      margin={{ top: 24, bottom: 24 }}
                       series={[
                         {
                           data: data.timeSeries.map((t) => t.amount),
                           color: "#2563EB",
+                          barLabelPlacement: "outside",
+                          barLabel: (item) =>
+                            showCardSpendLabels && !isPrivacyHidden && item.value
+                              ? formatShortAxis(item.value, false)
+                              : null,
                           valueFormatter: moneyValueFormatter,
                         },
                       ]}
@@ -115,13 +138,27 @@ export default function AutoChartDrawer() {
 
               {data.hourlyData && data.hourlyData.length > 0 && (
                 <Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                    Time-of-Day Routine Heatmap (24 Hours)
-                  </Typography>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                      Time-of-Day Routine Heatmap (24 Hours)
+                    </Typography>
+                    <ChartCardHeaderMenu chartKey={`drawer-${type}-${id}-hourly`} pointCount={hourlyPtsCount} />
+                  </Box>
                   <Box sx={{ width: "100%", minWidth: 0, height: 200 }}>
                     <BarChart
                       xAxis={[{ scaleType: "band", data: data.hourlyData.map((h) => h.hour) }]}
-                      series={[{ data: data.hourlyData.map((h) => h.count), color: "#F59E0B" }]}
+                      margin={{ top: 20, bottom: 22 }}
+                      series={[
+                        {
+                          data: data.hourlyData.map((h) => h.count),
+                          color: "#F59E0B",
+                          barLabelPlacement: "outside",
+                          barLabel: (item) =>
+                            showCardHourlyLabels && !isPrivacyHidden && item.value > 0
+                              ? String(item.value)
+                              : null,
+                        },
+                      ]}
                       height={190}
                     />
                   </Box>
@@ -133,18 +170,39 @@ export default function AutoChartDrawer() {
           {/* 2. Vault Balance History */}
           {type === "VAULT" && (
             <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                Running Balance Timeline (Current: <MoneyValue value={data.currentBalance} includeCents allowTapToggle />)
-              </Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                  Running Balance Timeline (Current:{" "}
+                  <MoneyValue
+                    value={data.totalEstimatedBase ?? data.currentBalance}
+                    currency={data.baseCurrency || "IDR"}
+                    includeCents
+                    allowTapToggle
+                  />
+                  )
+                </Typography>
+                <ChartCardHeaderMenu chartKey={`drawer-${type}-${id}-vault`} pointCount={vaultPtsCount} />
+              </Box>
               {data.balanceTimeline && data.balanceTimeline.length > 0 ? (
                 <Box sx={{ width: "100%", minWidth: 0, height: 280 }}>
                   <LineChart
                     xAxis={[{ scaleType: "point", data: data.balanceTimeline.map((b) => b.date) }]}
                     yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                    margin={{ top: 24, right: 16, bottom: 24 }}
+                    slots={{ mark: ChartDotLabelMark }}
+                    slotProps={{
+                      mark: {
+                        showLabels: showVaultLabels,
+                        isPrivacyHidden,
+                      },
+                    }}
                     series={[
                       {
+                        id: "vault-bal-line",
                         data: data.balanceTimeline.map((b) => b.runningBalance),
                         color: "#10B981",
+                        shape: "circle",
+                        showMark: showVaultLabels,
                         valueFormatter: moneyValueFormatter,
                       },
                     ]}
@@ -187,17 +245,26 @@ export default function AutoChartDrawer() {
 
               {data.timeSeries && data.timeSeries.length > 0 && (
                 <Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                    Expenditure Timeline
-                  </Typography>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                      Expenditure Timeline
+                    </Typography>
+                    <ChartCardHeaderMenu chartKey={`drawer-${type}-${id}-layer`} pointCount={cardPtsCount} />
+                  </Box>
                   <Box sx={{ width: "100%", minWidth: 0, height: 240 }}>
                     <BarChart
                       xAxis={[{ scaleType: "band", data: data.timeSeries.map((t) => t.date) }]}
                       yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                      margin={{ top: 24, bottom: 24 }}
                       series={[
                         {
                           data: data.timeSeries.map((t) => t.amount),
                           color: "#F97316",
+                          barLabelPlacement: "outside",
+                          barLabel: (item) =>
+                            showLayerLabels && !isPrivacyHidden && item.value
+                              ? formatShortAxis(item.value, false)
+                              : null,
                           valueFormatter: moneyValueFormatter,
                         },
                       ]}

@@ -68,6 +68,26 @@ export const useLedgerStore = create((set) => ({
   openManageCardsDialog: () => set({ manageCardsDialog: { open: true } }),
   closeManageCardsDialog: () => set({ manageCardsDialog: { open: false } }),
 
+  // Save/Promote Transaction as Action Card dialog state
+  promoteCardDialog: {
+    open: false,
+    transaction: null,
+  },
+  openPromoteCardDialog: (transaction) =>
+    set({ promoteCardDialog: { open: true, transaction } }),
+  closePromoteCardDialog: () =>
+    set({ promoteCardDialog: { open: false, transaction: null } }),
+
+  // Persistent save-time Action Card suggestion dialog state
+  cardSuggestionDialog: {
+    open: false,
+    suggestion: null,
+  },
+  openCardSuggestionDialog: (suggestion) =>
+    set({ cardSuggestionDialog: { open: true, suggestion } }),
+  closeCardSuggestionDialog: () =>
+    set({ cardSuggestionDialog: { open: false, suggestion: null } }),
+
   // Add Contact / Party dialog state (#17 & Backlog 02 #8)
   addPartyDialog: {
     open: false,
@@ -85,17 +105,75 @@ export const useLedgerStore = create((set) => ({
   closeAddPartyDialog: () =>
     set({ addPartyDialog: { open: false, onCreated: null, isDebtContact: false } }),
 
+  // Vault Add / Edit Profile dialog state (#5, #7)
+  vaultProfileDialog: {
+    open: false,
+    mode: "CREATE", // CREATE | EDIT
+    vault: null,
+  },
+  openVaultProfileDialog: (vault = null) =>
+    set({
+      vaultProfileDialog: {
+        open: true,
+        mode: vault ? "EDIT" : "CREATE",
+        vault,
+      },
+    }),
+  closeVaultProfileDialog: () =>
+    set({
+      vaultProfileDialog: { open: false, mode: "CREATE", vault: null },
+    }),
+
+  // Dynamic Sub-Vault & Sync Split dialog state (#3)
+  subVaultSyncDialog: {
+    open: false,
+    vaultId: null,
+  },
+  openSubVaultSyncDialog: (vaultId = null) =>
+    set({
+      subVaultSyncDialog: { open: true, vaultId },
+    }),
+  closeSubVaultSyncDialog: () =>
+    set({
+      subVaultSyncDialog: { open: false, vaultId: null },
+    }),
+
+  // Global Currency & Frankfurter v2 FX Settings dialog state (#4)
+  fxSettingsDialog: {
+    open: false,
+  },
+  openFxSettingsDialog: () => set({ fxSettingsDialog: { open: true } }),
+  closeFxSettingsDialog: () => set({ fxSettingsDialog: { open: false } }),
+
+  // Chart data-point & value-label overrides (#1: AUTO follows <= 31 points rule; true/false forces visibility)
+  analyticsGlobalLabelsMode: "AUTO", // AUTO | SHOW | HIDE
+  setAnalyticsGlobalLabelsMode: (mode) =>
+    set({
+      analyticsGlobalLabelsMode: mode,
+      chartLabelOverrides: {},
+    }),
+  chartLabelOverrides: {},
+  setChartLabelOverride: (chartKey, nextBool) =>
+    set((state) => ({
+      chartLabelOverrides: {
+        ...state.chartLabelOverrides,
+        [chartKey]: nextBool,
+      },
+    })),
+
   // In-house Toast Queue (#14 & #20) replacing native alert()
   toasts: [],
   enqueueToast: (message, options = {}) =>
     set((state) => {
       const id = nextToastId++;
+      const hasQuickAction = Boolean(options.undoTransactionId || options.promoteTransaction);
       const newToast = {
         id,
         message,
         severity: options.severity || "success", // success, info, warning, error
-        duration: options.duration ?? (options.undoTransactionId ? 5000 : 4000),
+        duration: options.duration ?? (hasQuickAction ? 5000 : 4000),
         undoTransactionId: options.undoTransactionId || null,
+        promoteTransaction: options.promoteTransaction || null,
       };
       // Keep max 4 stacked toasts visible
       return { toasts: [...state.toasts.slice(-3), newToast] };

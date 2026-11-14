@@ -33,6 +33,9 @@ import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import VisibilityOffOutlinedIcon from "@mui/icons-material/VisibilityOffOutlined";
+import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
+import CloseIcon from "@mui/icons-material/Close";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Tooltip } from "@mui/material";
@@ -44,8 +47,13 @@ import ReconcileModal from "@/components/ReconcileModal";
 import ExportModal from "@/components/ExportModal";
 import AddPartyModal from "@/components/AddPartyModal";
 import ManageCardsModal from "@/components/ManageCardsModal";
+import PromoteToCardModal from "@/components/PromoteToCardModal";
+import CardSuggestionModal from "@/components/CardSuggestionModal";
 import CustomTransactionModal from "@/components/CustomTransactionModal";
 import AutoChartDrawer from "@/components/AutoChartDrawer";
+import VaultProfileModal from "@/components/VaultProfileModal";
+import SubVaultSyncModal from "@/components/SubVaultSyncModal";
+import FxSettingsModal from "@/components/FxSettingsModal";
 
 const DRAWER_WIDTH = 260;
 
@@ -68,12 +76,14 @@ export default function AppLayout({ children }) {
 
   const openReconcileDialog = useLedgerStore((s) => s.openReconcileDialog);
   const openExportDialog = useLedgerStore((s) => s.openExportDialog);
+  const openFxSettingsDialog = useLedgerStore((s) => s.openFxSettingsDialog);
+  const openVaultProfileDialog = useLedgerStore((s) => s.openVaultProfileDialog);
   const isCompactNumbers = useLedgerStore((s) => s.isCompactNumbers);
   const toggleCompactNumbers = useLedgerStore((s) => s.toggleCompactNumbers);
   const isPrivacyHidden = useLedgerStore((s) => s.isPrivacyHidden);
   const togglePrivacyHidden = useLedgerStore((s) => s.togglePrivacyHidden);
 
-  // Fetch quick net wealth for the top header badge
+  // Fetch quick net wealth & app settings for top header badge and global modals
   const { data } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => {
@@ -85,11 +95,12 @@ export default function AppLayout({ children }) {
   });
 
   const netWealth = data?.summary?.netTotalWealth;
+  const baseCurrency = data?.appSettings?.baseCurrency || "IDR";
 
   const drawerContent = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {/* Drawer Brand */}
-      <Box sx={{ p: 2.5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      {/* Drawer Brand + Owner Profile (#2 kept cleanly above AppBar on mobile) */}
+      <Box sx={{ p: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Box
             sx={{
@@ -112,12 +123,16 @@ export default function AppLayout({ children }) {
               Vault Tracking
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              In-House Ledger &amp; Habit
+              Isa Tarmana • Owner ({baseCurrency})
             </Typography>
           </Box>
         </Stack>
 
-        {!isMobile && (
+        {isMobile ? (
+          <IconButton size="small" onClick={() => setMobileDrawerOpen(false)} aria-label="Close sidebar">
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        ) : (
           <IconButton size="small" onClick={() => setDesktopDrawerOpen(false)}>
             <ChevronLeftIcon />
           </IconButton>
@@ -168,6 +183,32 @@ export default function AppLayout({ children }) {
           QUICK TOOLS
         </Typography>
         <Stack spacing={1}>
+          <ListItemButton
+            onClick={() => {
+              if (isMobile) setMobileDrawerOpen(false);
+              openVaultProfileDialog(null);
+            }}
+            sx={{ borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}
+          >
+            <ListItemIcon sx={{ minWidth: 32, color: "#059669" }}>
+              <AddCircleOutlineIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary="Add New Vault" primaryTypographyProps={{ fontSize: "0.85rem", fontWeight: 600 }} />
+          </ListItemButton>
+
+          <ListItemButton
+            onClick={() => {
+              if (isMobile) setMobileDrawerOpen(false);
+              openFxSettingsDialog();
+            }}
+            sx={{ borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}
+          >
+            <ListItemIcon sx={{ minWidth: 32, color: "#7C3AED" }}>
+              <CurrencyExchangeIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary="Currency & FX" primaryTypographyProps={{ fontSize: "0.85rem", fontWeight: 600 }} />
+          </ListItemButton>
+
           <ListItemButton
             onClick={() => {
               if (isMobile) setMobileDrawerOpen(false);
@@ -263,7 +304,7 @@ export default function AppLayout({ children }) {
 
             {netWealth !== undefined && (
               <Chip
-                label={<MoneyValue value={netWealth} />}
+                label={<MoneyValue value={netWealth} currency={baseCurrency} />}
                 component={Link}
                 href="/analytics"
                 clickable
@@ -297,7 +338,7 @@ export default function AppLayout({ children }) {
         </Drawer>
       )}
 
-      {/* Mobile / Android Temporary Drawer */}
+      {/* Mobile / Android Temporary Drawer — elevated above AppBar so brand/profile stays visible (#2) */}
       {isMobile && (
         <Drawer
           variant="temporary"
@@ -305,6 +346,7 @@ export default function AppLayout({ children }) {
           onClose={() => setMobileDrawerOpen(false)}
           ModalProps={{ keepMounted: true }}
           sx={{
+            zIndex: (t) => t.zIndex.drawer + 2,
             "& .MuiDrawer-paper": {
               width: DRAWER_WIDTH,
               boxSizing: "border-box",
@@ -380,6 +422,13 @@ export default function AppLayout({ children }) {
         categories={data?.categories || []}
         parties={data?.parties || []}
       />
+      <PromoteToCardModal
+        vaults={data?.vaults || []}
+        categories={data?.categories || []}
+        parties={data?.parties || []}
+        baseCurrency={baseCurrency}
+      />
+      <CardSuggestionModal />
       <CustomTransactionModal
         vaults={data?.vaults || []}
         categories={data?.categories || []}
@@ -387,7 +436,16 @@ export default function AppLayout({ children }) {
         latestCheckpointsByVault={data?.latestCheckpointsByVault || {}}
         defaultMonthlyVaultId={data?.defaultMonthlyVaultId || null}
         defaultCashVaultId={data?.defaultCashVaultId || null}
+        baseCurrency={baseCurrency}
+        exchangeRates={data?.exchangeRates || {}}
       />
+      <VaultProfileModal baseCurrency={baseCurrency} />
+      <SubVaultSyncModal
+        vaults={data?.vaults || []}
+        baseCurrency={baseCurrency}
+        exchangeRates={data?.exchangeRates || {}}
+      />
+      <FxSettingsModal />
       <AutoChartDrawer />
     </Box>
   );

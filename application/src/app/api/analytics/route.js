@@ -5,6 +5,12 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { toDecimal, addMoney, subMoney, roundMoney } from "@/lib/money";
+import {
+  ensureFxRatesSyncedIfDue,
+  getOrCreateAppSettings,
+  getCachedRateMap,
+} from "@/lib/fxService";
+import { computeVaultPartitionSummary } from "@/lib/subVaultService";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +53,11 @@ export async function GET(request) {
     // 1. WEALTH JOURNEY, WATERFALL, CONSUMPTION TRENDS & VAULT FREQUENCY
     // ====================================================================
     if (targetType === "WEALTH_JOURNEY") {
+      await ensureFxRatesSyncedIfDue();
+      const appSettings = await getOrCreateAppSettings();
+      const baseCurrency = String(appSettings.baseCurrency || "IDR").toUpperCase();
+      const rateMap = await getCachedRateMap(baseCurrency);
+
       // Load full chronological transactions to build exact running net wealth & comparison baseline
       const allTxs = await prisma.transaction.findMany({
         include: {
@@ -58,9 +69,23 @@ export async function GET(request) {
         orderBy: [{ transactionDate: "asc" }, { transactionTime: "asc" }, { id: "asc" }],
       });
 
-      const vaults = await prisma.vault.findMany({
+      const rawVaults = await prisma.vault.findMany({
         where: { isActive: true },
+        include: {
+          subContainers: {
+            orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
+          },
+        },
         orderBy: { currentBalance: "desc" },
+      });
+
+      const vaults = rawVaults.map((v) => {
+        const partitionSummary = computeVaultPartitionSummary(v, baseCurrency, rateMap);
+        return {
+          ...v,
+          partitionSummary,
+          totalEstimatedBase: partitionSummary.totalEstimatedBase,
+        };
       });
 
       const parties = await prisma.party.findMany({
@@ -136,7 +161,7 @@ export async function GET(request) {
       const colors = ["#2563EB", "#059669", "#D97706", "#7C3AED", "#DB2777", "#0891B2", "#4F46E5", "#EA580C", "#10B981"];
 
       for (const v of vaults) {
-        const balDec = toDecimal(v.currentBalance);
+        const balDec = toDecimal(v.totalEstimatedBase ?? v.currentBalance);
         const balNum = balDec.toNumber();
         if (v.vaultType === "LIABILITY_CREDIT_LINE") {
           if (balDec.lessThan(0)) liabilityVaultPayable = addMoney(liabilityVaultPayable, balDec.abs());
@@ -374,7 +399,7 @@ export async function GET(request) {
         .map((v) => {
           const hit = vaultCountMap.get(v.id);
           const count = hit ? hit.count : 0;
-          const balNum = toDecimal(v.currentBalance).toNumber();
+          const balNum = toDecimal(v.totalEstimatedBase ?? v.currentBalance).toNumber();
           return {
             vaultId: v.id,
             name: v.name,
@@ -394,6 +419,8 @@ export async function GET(request) {
       return NextResponse.json({
         success: true,
         data: {
+          baseCurrency,
+          exchangeRates: rateMap,
           wealthTimeline,
           waterfallData,
           dailyConsumption,
@@ -464,10 +491,20 @@ export async function GET(request) {
     // ==========================================
     if (targetType === "VAULT") {
       const vaultId = parseInt(targetId, 10);
+      const settings = await getOrCreateAppSettings();
+      const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
+      const rateMap = await getCachedRateMap(baseCurrency);
       const vault = await prisma.vault.findUnique({
         where: { id: vaultId },
+        include: {
+          subContainers: {
+            orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
+          },
+        },
       });
       if (!vault) return NextResponse.json({ success: false, error: "Vault not found" }, { status: 404 });
+
+      const partitionSummary = computeVaultPartitionSummary(vault, baseCurrency, rateMap);
 
       const legs = await prisma.transactionLeg.findMany({
         where: { vaultId: vault.id },
@@ -488,6 +525,9 @@ export async function GET(request) {
         data: {
           title: vault.name,
           currentBalance: roundMoney(vault.currentBalance),
+          totalEstimatedBase: partitionSummary.totalEstimatedBase,
+          baseCurrency,
+          partitionSummary,
           balanceTimeline,
         },
       });

@@ -1,0 +1,30 @@
+#1
+aku ingin di chart batang dan garis pada puncak atau titiknya tertera angkanya dan juga titik bulat. jadi user gak perlu hover atau tap diagramnya untuk melihat nilai detailnya. mungkin ada titik tiga yang bisa hide titik dan angka tersebut. 
+
+#2 kayanya profile di side bar pada device hp ketutupan sama nav bar. tolong perbaiki.
+
+#3
+pada vault cash ada dompet 1 dan 2. aku ingin setiap vault bisa menambahkan sub vault juga. jadi misal dana awal aku isi vault bank nobu 10 jt. lalu aku buat sub vault pertama (nama bisa bebas) dan sub vault kedua. keduanya baru dibuat berarti masih kosong. nah aku melakukan transaksi makan siang pake dompet kedua. maka harusnya bisa dan vault utama berkurang. lalu aku ingat dan isi (berarti di sync ya?) sub vault pertama 5 jt . maka vault utama bertambah 5jt. maka otomatis vault kedua terisi. tapi kalau ada vault ketiga maka gak terisi otomatis ya. dan jika aku melakukan transaksi bukan pake vault pertama yang udah di sync dan jumlahnya besar sehingga seakan akan vault pertama ikut andil di transaksi tersebut. contoh tadi vault utama 15 jt, lalu vault pertama 5jt. dan aku membuat vault kedua dan ketiga. lalu aku melakukan transaksi di vault ketiga sebesar 13jt. maka nanti ada warn kalau sub vault belum di sync sehingga jelas sekat sekat vault nya ada yang tidak pas. namun bisa juga membypas sekat2 itu ya mungkin memang secara teransaksi nya boleh kaya gitu dan otomatis sub vault lain terpengaruh. yang jelas ada penandanya. 
+
+#4
+lanjut dari yang ke #3. kenapa aku ingin ada sub vault. karena kadang di bank ada rekening valas. jadi aku ingin juga mencatat hartaku. jadi ada fitur mata uang dan default adalah idr. lalu saat aku memasukan valas, aku ingin di web bisa sync ke https://api.frankfurter.dev/v2/rate/usd/idr setiap waktu yg ditentukan(configurable default 3 hari 1x). jadi agar tidak spam ke api public itu aku ingin gak setiap saat komponen di render lalu ambil, tapi kita ambil dan simpan di db sekali setiap perhitungan waktu. mungkin ada menu seting yang bisa berikan berapa hari harus di sync mata uangnya dan tombol sync now.
+
+#5
+refer ke #3 dan #4, berarti aku butuh untuk menambahkan sebuah vault baru. dan mungkin aku perlu vault profile. plus aku juga bisa pilih icon atau gambar untuk simbol vault tersebut .
+
+
+#6
+aku cek ui di hp pada form record transaction unttuk field date time khususnya pada form date terlalu sempit . apakah gak bisa pake MUI component saja kah ? atau itu harus menggunakan MUI component pro ?.
+
+#7
+refer #5 untuk upload gambar sebagai icon atau profile vault. aku ingin saat upload ada mekanisme crop persegi dan lingkaran untuk bisa langsung mengetahui nanti akan seperti apa . untuk gambar profile itu mungkin masukan ke folder public saja. oh dan juga bisa menentukan warna vault tersebut. penentuan pake color picker yaa jangan hardcode saja pilihan warnanya.
+
+#8 
+pada Action, diatas Smart Action Cards ada tombol dedicated untuk (+ Transaction). sehingga flow pertama user melihat dulu (+ Transaction) sebagai penambahan transaksi biasa. lalu di bawahnya ada Smart Action Cards. sebab Cards transaction itu adalah sebuah kemudahaan dari penambahan transaction biasa . sekarang  seakan akan seperti semua harus di Card yang sudah di difine. jadi hapus tombol "+ Custom Tx" karena diganti dengan (+ Transaction).
+
+#9
+pada form Record Transaction bisa buat dia lebih elegant ? jadi user tidak melihat fitur itu seperti sebatas konfigurasi saja. sebab fitur itu merupakan fitur backbone dari aplikasi ini.
+
+#
+untuk sekarang kamu gak perlu testing ui browser.
+

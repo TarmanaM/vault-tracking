@@ -37,6 +37,11 @@ import { useLedgerStore } from "@/store/useLedgerStore";
 import { formatShortAxis, formatMoneyDisplay } from "@/lib/money";
 import MoneyValue from "@/components/MoneyValue";
 import LayerConsumptionOverview from "@/components/LayerConsumptionOverview";
+import {
+  useChartLabelVisibility,
+  ChartCardHeaderMenu,
+  ChartDotLabelMark,
+} from "@/components/ChartCardHeaderMenu";
 
 const PRESET_RANGES = [
   { value: "1M", label: "1M" },
@@ -50,6 +55,8 @@ const PRESET_RANGES = [
 export default function AnalyticsPage() {
   const isPrivacyHidden = useLedgerStore((s) => s.isPrivacyHidden);
   const openChartDrawer = useLedgerStore((s) => s.openChartDrawer);
+  const analyticsGlobalLabelsMode = useLedgerStore((s) => s.analyticsGlobalLabelsMode);
+  const setAnalyticsGlobalLabelsMode = useLedgerStore((s) => s.setAnalyticsGlobalLabelsMode);
 
   const [preset, setPreset] = useState("3M");
   const [customStart, setCustomStart] = useState("");
@@ -88,6 +95,16 @@ export default function AnalyticsPage() {
     setInfoState({ anchorEl: e.currentTarget, title, text });
   };
 
+  const waterfallPtsCount = analytics?.waterfallData?.length || 0;
+  const dailyPtsCount = analytics?.dailyConsumption?.length || 0;
+  const monthlyPtsCount = analytics?.monthlyConsumption?.length || 0;
+  const wealthPtsCount = analytics?.wealthTimeline?.length || 0;
+
+  const { showLabels: showWaterfallLabels } = useChartLabelVisibility("waterfall", waterfallPtsCount);
+  const { showLabels: showDailyLabels } = useChartLabelVisibility("daily-consume", dailyPtsCount);
+  const { showLabels: showMonthlyLabels } = useChartLabelVisibility("monthly-consume", monthlyPtsCount);
+  const { showLabels: showWealthLabels } = useChartLabelVisibility("wealth-timeline", wealthPtsCount);
+
   if (isLoading) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
@@ -116,6 +133,16 @@ export default function AnalyticsPage() {
     dateRangeApplied = {},
   } = analytics;
 
+  const cycleGlobalLabelsMode = () => {
+    const next =
+      analyticsGlobalLabelsMode === "AUTO"
+        ? "SHOW"
+        : analyticsGlobalLabelsMode === "SHOW"
+        ? "HIDE"
+        : "AUTO";
+    setAnalyticsGlobalLabelsMode(next);
+  };
+
   const isUp = wealthComparison.direction === "UP";
   const isDown = wealthComparison.direction === "DOWN";
 
@@ -137,6 +164,21 @@ export default function AnalyticsPage() {
         </Box>
 
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+          <Chip
+            label={
+              analyticsGlobalLabelsMode === "SHOW"
+                ? "Labels: All ON"
+                : analyticsGlobalLabelsMode === "HIDE"
+                ? "Labels: All OFF"
+                : "Labels: Auto (≤31)"
+            }
+            size="small"
+            clickable
+            onClick={cycleGlobalLabelsMode}
+            color={analyticsGlobalLabelsMode === "SHOW" ? "secondary" : "default"}
+            variant={analyticsGlobalLabelsMode === "AUTO" ? "outlined" : "filled"}
+            sx={{ fontWeight: 700, mr: 0.5 }}
+          />
           {PRESET_RANGES.map((opt) => (
             <Chip
               key={opt.value}
@@ -289,24 +331,28 @@ export default function AnalyticsPage() {
                 <Chip size="small" label="Uang Keluar" sx={{ height: 20, fontSize: "0.68rem", bgcolor: "#FEE2E2", color: "#B91C1C", fontWeight: 700 }} />
               </Stack>
             </Stack>
-            <IconButton
-              size="small"
-              onClick={(e) =>
-                openInfo(
-                  e,
-                  "Cashflow Waterfall Chart",
-                  "Plots daily net cashflow delta (Debit - Kredit) cumulatively, rising green on inflow days and stepping red on outflow days. Excludes Initial Funds and internal Vault Transfers."
-                )
-              }
-            >
-              <InfoOutlinedIcon fontSize="small" />
-            </IconButton>
+            <Stack direction="row" spacing={0.25} alignItems="center">
+              <ChartCardHeaderMenu chartKey="waterfall" pointCount={waterfallData.length} />
+              <IconButton
+                size="small"
+                onClick={(e) =>
+                  openInfo(
+                    e,
+                    "Cashflow Waterfall Chart",
+                    "Plots daily net cashflow delta (Debit - Kredit) cumulatively, rising green on inflow days and stepping red on outflow days. Excludes Initial Funds and internal Vault Transfers."
+                  )
+                }
+              >
+                <InfoOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Stack>
           </Box>
           <Box sx={{ width: "100%", minWidth: 0, height: { xs: 240, sm: 290 } }}>
             {waterfallData.length > 0 ? (
               <BarChart
                 xAxis={[{ scaleType: "band", data: waterfallData.map((d) => d.date.slice(5)) }]}
                 yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                margin={{ top: 24, bottom: 28 }}
                 slotProps={{ legend: { hidden: true } }}
                 series={[
                   {
@@ -326,6 +372,12 @@ export default function AnalyticsPage() {
                     stack: "wf",
                     label: "Inflow (+)",
                     color: "#16A34A",
+                    barLabelPlacement: "outside",
+                    barLabel: (item) => {
+                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
+                      const row = waterfallData[item.dataIndex];
+                      return row ? `+${formatShortAxis(Math.abs(row.delta), false)}` : null;
+                    },
                     valueFormatter: (v, ctx) => {
                       if (!v) return null;
                       const row = waterfallData[ctx.dataIndex];
@@ -338,6 +390,12 @@ export default function AnalyticsPage() {
                     stack: "wf",
                     label: "Inflow (Below Zero)",
                     color: "#16A34A",
+                    barLabelPlacement: "outside",
+                    barLabel: (item) => {
+                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
+                      const row = waterfallData[item.dataIndex];
+                      return row ? `+${formatShortAxis(Math.abs(row.delta), false)}` : null;
+                    },
                     valueFormatter: (v, ctx) => {
                       if (!v) return null;
                       const row = waterfallData[ctx.dataIndex];
@@ -350,6 +408,12 @@ export default function AnalyticsPage() {
                     stack: "wf",
                     label: "Outflow (-)",
                     color: "#DC2626",
+                    barLabelPlacement: "outside",
+                    barLabel: (item) => {
+                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
+                      const row = waterfallData[item.dataIndex];
+                      return row ? formatShortAxis(row.delta, false) : null;
+                    },
                     valueFormatter: (v, ctx) => {
                       if (!v) return null;
                       const row = waterfallData[ctx.dataIndex];
@@ -362,6 +426,12 @@ export default function AnalyticsPage() {
                     stack: "wf",
                     label: "Outflow (Below Zero)",
                     color: "#DC2626",
+                    barLabelPlacement: "outside",
+                    barLabel: (item) => {
+                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
+                      const row = waterfallData[item.dataIndex];
+                      return row ? formatShortAxis(row.delta, false) : null;
+                    },
                     valueFormatter: (v, ctx) => {
                       if (!v) return null;
                       const row = waterfallData[ctx.dataIndex];
@@ -392,30 +462,44 @@ export default function AnalyticsPage() {
                 <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
                   Daily Consumption &amp; Trendline
                 </Typography>
-                <IconButton
-                  size="small"
-                  onClick={(e) =>
-                    openInfo(
-                      e,
-                      "Daily Consumption Curve",
-                      "Plots genuine personal consumption days (skipping zero-consume days) with downward negative spikes below Rp 0 and an in-house linear regression trendline."
-                    )
-                  }
-                >
-                  <InfoOutlinedIcon fontSize="small" />
-                </IconButton>
+                <Stack direction="row" spacing={0.25} alignItems="center">
+                  <ChartCardHeaderMenu chartKey="daily-consume" pointCount={dailyConsumption.length} />
+                  <IconButton
+                    size="small"
+                    onClick={(e) =>
+                      openInfo(
+                        e,
+                        "Daily Consumption Curve",
+                        "Plots genuine personal consumption days (skipping zero-consume days) with downward negative spikes below Rp 0 and an in-house linear regression trendline."
+                      )
+                    }
+                  >
+                    <InfoOutlinedIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
               </Box>
               <Box sx={{ width: "100%", minWidth: 0, height: { xs: 240, sm: 285 } }}>
                 {dailyConsumption.length > 0 ? (
                   <LineChart
                     xAxis={[{ scaleType: "point", data: dailyConsumption.map((d) => d.date.slice(5)) }]}
                     yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                    margin={{ top: 24, right: 16, bottom: 24 }}
+                    slots={{ mark: ChartDotLabelMark }}
+                    slotProps={{
+                      mark: {
+                        showLabels: showDailyLabels,
+                        isPrivacyHidden,
+                        skipSeriesIds: ["consume-trend"],
+                      },
+                    }}
                     series={[
                       {
                         id: "daily-consume",
                         label: "Consume",
                         data: dailyConsumption.map((d) => d.consume),
                         color: "#EF4444",
+                        shape: "circle",
+                        showMark: showDailyLabels,
                         valueFormatter: moneyTooltipFormatter,
                       },
                       {
@@ -454,29 +538,38 @@ export default function AnalyticsPage() {
                 <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
                   Monthly Consumption
                 </Typography>
-                <IconButton
-                  size="small"
-                  onClick={(e) =>
-                    openInfo(
-                      e,
-                      "Monthly Consumption Bar",
-                      "Monthly aggregate personal consumption drawn downward from Rp 0. Transfers, lending, and debt repayments are strictly excluded (Consume = 0)."
-                    )
-                  }
-                >
-                  <InfoOutlinedIcon fontSize="small" />
-                </IconButton>
+                <Stack direction="row" spacing={0.25} alignItems="center">
+                  <ChartCardHeaderMenu chartKey="monthly-consume" pointCount={monthlyConsumption.length} />
+                  <IconButton
+                    size="small"
+                    onClick={(e) =>
+                      openInfo(
+                        e,
+                        "Monthly Consumption Bar",
+                        "Monthly aggregate personal consumption drawn downward from Rp 0. Transfers, lending, and debt repayments are strictly excluded (Consume = 0)."
+                      )
+                    }
+                  >
+                    <InfoOutlinedIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
               </Box>
               <Box sx={{ width: "100%", minWidth: 0, height: { xs: 240, sm: 285 } }}>
                 {monthlyConsumption.length > 0 ? (
                   <BarChart
                     xAxis={[{ scaleType: "band", data: monthlyConsumption.map((m) => m.month) }]}
                     yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                    margin={{ top: 18, bottom: 32 }}
                     series={[
                       {
                         label: "Monthly Consume",
                         data: monthlyConsumption.map((m) => m.consume),
                         color: "#DC2626",
+                        barLabelPlacement: "outside",
+                        barLabel: (item) =>
+                          showMonthlyLabels && !isPrivacyHidden && item.value
+                            ? formatShortAxis(item.value, false)
+                            : null,
                         valueFormatter: moneyTooltipFormatter,
                       },
                     ]}
@@ -627,31 +720,44 @@ export default function AnalyticsPage() {
                 <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
                   Wealth Trajectory Timeline
                 </Typography>
-                <IconButton
-                  size="small"
-                  onClick={(e) =>
-                    openInfo(
-                      e,
-                      "Wealth Trajectory Timeline",
-                      "Chronological curve of total Net Wealth (Liquid Vaults + Receivables - Payables) across the selected date range."
-                    )
-                  }
-                >
-                  <InfoOutlinedIcon fontSize="small" />
-                </IconButton>
+                <Stack direction="row" spacing={0.25} alignItems="center">
+                  <ChartCardHeaderMenu chartKey="wealth-timeline" pointCount={wealthTimeline.length} />
+                  <IconButton
+                    size="small"
+                    onClick={(e) =>
+                      openInfo(
+                        e,
+                        "Wealth Trajectory Timeline",
+                        "Chronological curve of total Net Wealth (Liquid Vaults + Receivables - Payables) across the selected date range."
+                      )
+                    }
+                  >
+                    <InfoOutlinedIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
               </Box>
               <Box sx={{ width: "100%", minWidth: 0, height: { xs: 240, sm: 285 } }}>
                 {wealthTimeline.length > 0 ? (
                   <LineChart
                     xAxis={[{ scaleType: "point", data: wealthTimeline.map((p) => p.date.slice(5)) }]}
                     yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                    margin={{ top: 24, right: 16, bottom: 24 }}
+                    slots={{ mark: ChartDotLabelMark }}
+                    slotProps={{
+                      mark: {
+                        showLabels: showWealthLabels,
+                        isPrivacyHidden,
+                      },
+                    }}
                     series={[
                       {
+                        id: "net-wealth",
                         label: "Net Wealth",
                         data: wealthTimeline.map((p) => p.wealth),
                         color: "#2563EB",
                         area: false,
-                        showMark: wealthTimeline.length <= 35,
+                        shape: "circle",
+                        showMark: showWealthLabels,
                         valueFormatter: moneyTooltipFormatter,
                       },
                     ]}

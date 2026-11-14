@@ -86,11 +86,13 @@ export async function GET(request) {
     }
 
     // Default Flat CSV
-    let flatCsv = "ID,Date,Time,Month,Title,Nature,Category,Party,Amount (IDR),Consume (IDR),Vaults Affected,Notes\n";
+    let flatCsv = "ID,Date,Time,Month,Title,Nature,Category,Party,Amount (Base),Consume (Base),Entry Currency,Original Amount,FX Rate,Vaults Affected,Notes\n";
     for (const t of transactions) {
       const dateStr = t.transactionDate.toISOString().split("T")[0];
       const vaultsAffected = t.legs.map((l) => `${l.vault.name} (${toDecimal(l.netMutation).toNumber()})`).join("; ");
-      flatCsv += `${t.id},"${dateStr}","${t.transactionTime}","${t.monthTag}","${t.title}","${t.nature}","${t.category?.name || ""}","${t.party.name}",${toDecimal(t.grossAmount).toNumber()},${toDecimal(t.consumeAmount).toNumber()},"${vaultsAffected}","${t.notes || ""}"\n`;
+      const origAmt = t.originalGrossAmount !== null && t.originalGrossAmount !== undefined ? toDecimal(t.originalGrossAmount).toNumber() : "";
+      const fxApplied = t.fxRateApplied ? toDecimal(t.fxRateApplied).toNumber() : 1;
+      flatCsv += `${t.id},"${dateStr}","${t.transactionTime}","${t.monthTag}","${t.title}","${t.nature}","${t.category?.name || ""}","${t.party.name}",${toDecimal(t.grossAmount).toNumber()},${toDecimal(t.consumeAmount).toNumber()},"${t.currency || "IDR"}",${origAmt},${fxApplied},"${vaultsAffected}","${t.notes || ""}"\n`;
     }
 
     return new NextResponse(flatCsv, {
