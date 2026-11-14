@@ -90,6 +90,7 @@ export default function AddPartyModal() {
       partyType,
       alias: alias.trim(),
       externalAccount: externalAccount.trim(),
+      isDebtContact: Boolean(addPartyDialog.isDebtContact),
     });
   };
 

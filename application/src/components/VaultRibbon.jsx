@@ -5,33 +5,35 @@ import { Box, Typography, Card, CardActionArea, Stack, Chip } from "@mui/materia
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import MoneyValue from "@/components/MoneyValue";
 import { useLedgerStore } from "@/store/useLedgerStore";
+import { sortVaultsByBalanceDesc } from "@/lib/vaultHelpers";
 
 export default function VaultRibbon({ vaults = [] }) {
   const openChartDrawer = useLedgerStore((s) => s.openChartDrawer);
+  const sortedVaults = sortVaultsByBalanceDesc(vaults);
 
   return (
-    <Box sx={{ mb: 3 }}>
+    <Box sx={{ mb: { xs: 2, sm: 3 } }}>
       <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#475569", mb: 1, letterSpacing: 0.5 }}>
-        STORAGE VAULTS (Click to View Balance History)
+        STORAGE VAULTS (Sorted by Highest Balance)
       </Typography>
 
       <Box
         sx={{
           display: "flex",
-          gap: 1.5,
+          gap: 1.25,
           overflowX: "auto",
           pb: 1,
           "&::-webkit-scrollbar": { height: 6 },
           "&::-webkit-scrollbar-thumb": { backgroundColor: "#CBD5E1", borderRadius: 3 },
         }}
       >
-        {vaults.map((vault) => {
+        {sortedVaults.map((vault) => {
           const isNegative = Number(vault.currentBalance) < 0;
           return (
             <Card
               key={vault.id}
               sx={{
-                minWidth: 160,
+                minWidth: { xs: 146, sm: 162 },
                 flexShrink: 0,
                 borderTop: `3px solid ${vault.colorHex || "#3B82F6"}`,
                 bgcolor: "#FFFFFF",

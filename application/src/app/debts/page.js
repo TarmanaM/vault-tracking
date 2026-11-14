@@ -21,6 +21,7 @@ import {
   TextField,
   IconButton,
   Popover,
+  InputAdornment,
 } from "@mui/material";
 import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
 import PersonAddAlt1OutlinedIcon from "@mui/icons-material/PersonAddAlt1Outlined";
@@ -29,6 +30,8 @@ import VolunteerActivismIcon from "@mui/icons-material/VolunteerActivism";
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import SearchIcon from "@mui/icons-material/Search";
+import CloseIcon from "@mui/icons-material/Close";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
@@ -44,6 +47,7 @@ export default function DebtsPage() {
   } = useLedgerStore();
 
   const [infoAnchor, setInfoAnchor] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [writeOffModal, setWriteOffModal] = useState({
     open: false,
     debtEntry: null,
@@ -112,13 +116,25 @@ export default function DebtsPage() {
     (p) => p.code !== "SELF" && p.partyType !== "SELF"
   );
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredParties = externalParties.filter((p) => {
+    if (!normalizedQuery) return true;
+    const matchName = p.name?.toLowerCase().includes(normalizedQuery);
+    const matchType = p.partyType?.toLowerCase().includes(normalizedQuery);
+    const matchAliases = p.aliasesJson?.toLowerCase().includes(normalizedQuery);
+    const matchAccounts = (p.externalAccounts || []).some((acc) =>
+      acc.toLowerCase().includes(normalizedQuery)
+    );
+    return matchName || matchType || matchAliases || matchAccounts;
+  });
+
   return (
-    <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 } }}>
+    <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 }, px: { xs: 1.5, sm: 3 } }}>
       {/* Header Bar */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.5, mb: 3 }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.25, mb: { xs: 2, sm: 2.5 } }}>
         <Stack direction="row" spacing={1} alignItems="center">
           <PeopleAltOutlinedIcon color="primary" />
-          <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A" }}>
+          <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A", fontSize: { xs: "1.18rem", sm: "1.5rem" } }}>
             Debt &amp; PayLater Sub-Ledger
           </Typography>
           <IconButton size="small" onClick={(e) => setInfoAnchor(e.currentTarget)}>
@@ -131,7 +147,7 @@ export default function DebtsPage() {
             size="small"
             variant="outlined"
             startIcon={<PersonAddAlt1OutlinedIcon />}
-            onClick={() => openAddPartyDialog()}
+            onClick={() => openAddPartyDialog(null, { isDebtContact: true })}
             sx={{ fontWeight: 700 }}
           >
             + Add Contact
@@ -162,50 +178,101 @@ export default function DebtsPage() {
         </Typography>
       </Popover>
 
-      {/* 3 Summary KPI Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={4}>
-          <Card sx={{ borderLeft: "4px solid #2563EB" }}>
-            <CardContent sx={{ p: 2 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                TOTAL RECEIVABLES (PIUTANG)
+      {/* 3 Compact Summary KPI Cards (#11 horizontal strip on mobile & desktop) */}
+      <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: { xs: 2, sm: 2.5 } }}>
+        <Grid size={4}>
+          <Card sx={{ borderLeft: "3px solid #2563EB", height: "100%" }}>
+            <CardContent sx={{ p: { xs: 1, sm: 2 }, "&:last-child": { pb: { xs: 1, sm: 2 } } }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                noWrap
+                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.6rem", sm: "0.75rem" } }}
+              >
+                PIUTANG
               </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800, color: "#2563EB", mt: 0.5 }}>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 800,
+                  color: "#2563EB",
+                  mt: 0.25,
+                  fontSize: { xs: "0.86rem", sm: "1.35rem" },
+                }}
+              >
                 <MoneyValue value={summary.totalReceivables} allowTapToggle />
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: { xs: "none", sm: "block" } }}
+              >
                 Money owed to you by friends/peers
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
-          <Card sx={{ borderLeft: "4px solid #DC2626" }}>
-            <CardContent sx={{ p: 2 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                TOTAL PAYABLES &amp; PAYLATER (UTANG)
+        <Grid size={4}>
+          <Card sx={{ borderLeft: "3px solid #DC2626", height: "100%" }}>
+            <CardContent sx={{ p: { xs: 1, sm: 2 }, "&:last-child": { pb: { xs: 1, sm: 2 } } }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                noWrap
+                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.6rem", sm: "0.75rem" } }}
+              >
+                UTANG
               </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800, color: "#DC2626", mt: 0.5 }}>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 800,
+                  color: "#DC2626",
+                  mt: 0.25,
+                  fontSize: { xs: "0.86rem", sm: "1.35rem" },
+                }}
+              >
                 <MoneyValue value={summary.totalPayables} allowTapToggle />
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: { xs: "none", sm: "block" } }}
+              >
                 What you owe to contacts &amp; lenders
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
-          <Card sx={{ borderLeft: "4px solid #7C3AED" }}>
-            <CardContent sx={{ p: 2 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                HELD FUND POOL (TITIPAN / TASPEN)
+        <Grid size={4}>
+          <Card sx={{ borderLeft: "3px solid #7C3AED", height: "100%" }}>
+            <CardContent sx={{ p: { xs: 1, sm: 2 }, "&:last-child": { pb: { xs: 1, sm: 2 } } }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                noWrap
+                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.6rem", sm: "0.75rem" } }}
+              >
+                HELD POOL
               </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800, color: "#7C3AED", mt: 0.5 }}>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 800,
+                  color: "#7C3AED",
+                  mt: 0.25,
+                  fontSize: { xs: "0.86rem", sm: "1.35rem" },
+                }}
+              >
                 <MoneyValue value={summary.totalHeldFunds} allowTapToggle />
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: { xs: "none", sm: "block" } }}
+              >
                 Designated held balances
               </Typography>
             </CardContent>
@@ -213,9 +280,42 @@ export default function DebtsPage() {
         </Grid>
       </Grid>
 
+      {/* Contact Search Box (#12) */}
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          size="small"
+          fullWidth
+          placeholder="Search debt contact by name, alias, relationship, or bank note..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          sx={{ bgcolor: "#FFFFFF", maxWidth: { sm: 520 } }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" color="action" />
+              </InputAdornment>
+            ),
+            endAdornment: searchQuery ? (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={() => setSearchQuery("")}>
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ) : null,
+          }}
+        />
+      </Box>
+
       {/* Party Cards Grid */}
-      <Grid container spacing={2}>
-        {externalParties.map((party) => {
+      {filteredParties.length === 0 ? (
+        <Alert severity="info">
+          {searchQuery
+            ? `No debt contacts matching "${searchQuery}".`
+            : "No debt or loan contacts yet. Click Record Debt / Talangan or + Add Contact to start."}
+        </Alert>
+      ) : (
+      <Grid container spacing={{ xs: 1.5, sm: 2 }}>
+        {filteredParties.map((party) => {
           const recBal = Number(party.receivableBalance) || 0;
           const payBal = Number(party.payableBalance) || 0;
           const canOffset = recBal > 0 && payBal > 0;
@@ -236,7 +336,7 @@ export default function DebtsPage() {
           );
 
           return (
-            <Grid item xs={12} md={6} key={party.id}>
+            <Grid size={{ xs: 12, md: 6 }} key={party.id}>
               <Card sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
                 <CardContent sx={{ p: 2.25, flexGrow: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
                   {/* Party Title & Detail Link */}
@@ -276,7 +376,7 @@ export default function DebtsPage() {
 
                   {/* Separate Receivable vs Payable Balances (#22-2) */}
                   <Grid container spacing={1.5}>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: "#EFF6FF", border: "1px solid #BFDBFE" }}>
                         <Typography variant="caption" sx={{ fontWeight: 700, color: "#1E40AF", display: "block" }}>
                           PIUTANG (Owes You)
@@ -286,7 +386,7 @@ export default function DebtsPage() {
                         </Typography>
                       </Box>
                     </Grid>
-                    <Grid item xs={6}>
+                    <Grid size={6}>
                       <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: "#FEF2F2", border: "1px solid #FECACA" }}>
                         <Typography variant="caption" sx={{ fontWeight: 700, color: "#991B1B", display: "block" }}>
                           UTANG (You Owe)
@@ -419,6 +519,7 @@ export default function DebtsPage() {
           );
         })}
       </Grid>
+      )}
 
       {/* Partial or Full Forgive / Write-Off Dialog (#21) */}
       <Dialog

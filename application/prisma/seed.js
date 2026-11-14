@@ -64,13 +64,13 @@ async function main() {
 
   // 3. Parties (Counterparties & Roles)
   const partiesData = [
-    { code: "ISA", name: "Isa", partyType: "SELF", aliasesJson: '["Self", "Saya"]' },
-    { code: "IBRAHIM", name: "Ibrahim (Dada)", partyType: "FAMILY", aliasesJson: '["Dada", "Sidada"]' },
-    { code: "FERNANDO", name: "Fernando", partyType: "FRIEND", aliasesJson: '["Nando"]' },
-    { code: "SLAMET", name: "Slamet", partyType: "FRIEND", aliasesJson: '["Amet"]' },
-    { code: "DDV", name: "DDV", partyType: "EMPLOYER", aliasesJson: '["Kantor", "Gaji"]' },
-    { code: "TASPEN", name: "Taspen", partyType: "INSTITUTION", aliasesJson: '["Dapem", "Santunan"]' },
-    { code: "SHOPEE_PAYLATER", name: "Shopee PayLater", partyType: "LENDER", aliasesJson: '["SPayLater", "Shopee"]' },
+    { code: "ISA", name: "Isa", partyType: "SELF", isDebtContact: false, aliasesJson: '["Self", "Saya"]' },
+    { code: "IBRAHIM", name: "Ibrahim (Dada)", partyType: "FAMILY", isDebtContact: true, aliasesJson: '["Dada", "Sidada"]' },
+    { code: "FERNANDO", name: "Fernando", partyType: "FRIEND", isDebtContact: true, aliasesJson: '["Nando"]' },
+    { code: "SLAMET", name: "Slamet", partyType: "FRIEND", isDebtContact: true, aliasesJson: '["Amet"]' },
+    { code: "DDV", name: "DDV", partyType: "EMPLOYER", isDebtContact: false, aliasesJson: '["Kantor", "Gaji"]' },
+    { code: "TASPEN", name: "Taspen", partyType: "INSTITUTION", isDebtContact: false, aliasesJson: '["Dapem", "Santunan"]' },
+    { code: "SHOPEE_PAYLATER", name: "Shopee PayLater", partyType: "LENDER", isDebtContact: true, aliasesJson: '["SPayLater", "Shopee"]' },
   ];
 
   const partyMap = {};

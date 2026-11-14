@@ -68,15 +68,22 @@ export const useLedgerStore = create((set) => ({
   openManageCardsDialog: () => set({ manageCardsDialog: { open: true } }),
   closeManageCardsDialog: () => set({ manageCardsDialog: { open: false } }),
 
-  // Add Contact / Party dialog state (#17)
+  // Add Contact / Party dialog state (#17 & Backlog 02 #8)
   addPartyDialog: {
     open: false,
     onCreated: null,
+    isDebtContact: false,
   },
-  openAddPartyDialog: (onCreated = null) =>
-    set({ addPartyDialog: { open: true, onCreated } }),
+  openAddPartyDialog: (onCreated = null, options = {}) =>
+    set({
+      addPartyDialog: {
+        open: true,
+        onCreated,
+        isDebtContact: Boolean(options?.isDebtContact),
+      },
+    }),
   closeAddPartyDialog: () =>
-    set({ addPartyDialog: { open: false, onCreated: null } }),
+    set({ addPartyDialog: { open: false, onCreated: null, isDebtContact: false } }),
 
   // In-house Toast Queue (#14 & #20) replacing native alert()
   toasts: [],

@@ -189,7 +189,7 @@ export default function ReconcileModal({ vaults = [] }) {
                 Count Physical Cash Wallets:
               </Typography>
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <CurrencyTextField
                     label="Dompet D1 (Utama)"
                     value={d1Balance}
@@ -197,7 +197,7 @@ export default function ReconcileModal({ vaults = [] }) {
                     showClear
                   />
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <CurrencyTextField
                     label="Dompet D2 (Cadangan)"
                     value={d2Balance}
@@ -216,7 +216,7 @@ export default function ReconcileModal({ vaults = [] }) {
                 Count Coin Pieces (Keping):
               </Typography>
               <Grid container spacing={1.5}>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Koin 1.000 (Pcs)"
                     type="number"
@@ -226,7 +226,7 @@ export default function ReconcileModal({ vaults = [] }) {
                     onChange={(e) => setCoin1000(e.target.value)}
                   />
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Koin 500 (Pcs)"
                     type="number"
@@ -236,7 +236,7 @@ export default function ReconcileModal({ vaults = [] }) {
                     onChange={(e) => setCoin500(e.target.value)}
                   />
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Koin 200 (Pcs)"
                     type="number"
@@ -246,7 +246,7 @@ export default function ReconcileModal({ vaults = [] }) {
                     onChange={(e) => setCoin200(e.target.value)}
                   />
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <TextField
                     label="Koin 100 (Pcs)"
                     type="number"

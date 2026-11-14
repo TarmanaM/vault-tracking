@@ -364,13 +364,32 @@ export async function GET(request) {
       consumptiveTxList.sort((a, b) => a.amount - b.amount);
       const topConsumptiveTransactions = consumptiveTxList.slice(0, 15);
 
-      // Vault usage frequency sorted descending
-      const vaultFreqList = Array.from(vaultCountMap.values()).sort((a, b) => b.count - a.count);
-      const totalVaultUses = vaultFreqList.reduce((acc, item) => acc + item.count, 0);
-      const vaultFrequency = vaultFreqList.map((item) => ({
-        ...item,
-        percent: totalVaultUses > 0 ? Number(((item.count / totalVaultUses) * 100).toFixed(1)) : 0,
-      }));
+      // All active vaults sorted descending by currentBalance, combined with usage count (#2, 01.png)
+      let totalVaultUses = 0;
+      for (const cnt of vaultCountMap.values()) {
+        totalVaultUses += cnt.count;
+      }
+
+      const vaultFrequency = vaults
+        .map((v) => {
+          const hit = vaultCountMap.get(v.id);
+          const count = hit ? hit.count : 0;
+          const balNum = toDecimal(v.currentBalance).toNumber();
+          return {
+            vaultId: v.id,
+            name: v.name,
+            color: v.colorHex || "#2563EB",
+            vaultType: v.vaultType,
+            currentBalance: Number(balNum.toFixed(2)),
+            count,
+            percent: totalVaultUses > 0 ? Number(((count / totalVaultUses) * 100).toFixed(1)) : 0,
+          };
+        })
+        .sort((a, b) => {
+          if (b.currentBalance !== a.currentBalance) return b.currentBalance - a.currentBalance;
+          if (b.count !== a.count) return b.count - a.count;
+          return a.name.localeCompare(b.name);
+        });
 
       return NextResponse.json({
         success: true,

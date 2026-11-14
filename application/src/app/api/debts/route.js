@@ -40,7 +40,8 @@ export async function GET() {
       }
     }
 
-    const enrichedParties = parties.map((p) => {
+    const enrichedParties = [];
+    for (const p of parties) {
       const rec = toDecimal(p.receivableBalance);
       const pay = toDecimal(p.payableBalance);
       const held = toDecimal(p.heldFundBalance);
@@ -51,6 +52,18 @@ export async function GET() {
         totalHeldFunds = addMoney(totalHeldFunds, held);
       }
 
+      const isSelf = p.code === "SELF" || p.partyType === "SELF";
+      const hasDebtRelevance =
+        Boolean(p.isDebtContact) ||
+        rec.greaterThan(0) ||
+        pay.greaterThan(0) ||
+        held.greaterThan(0) ||
+        (p.debtLedgerEntries && p.debtLedgerEntries.length > 0);
+
+      if (isSelf || !hasDebtRelevance) {
+        continue;
+      }
+
       let externalAccounts = [];
       try {
         externalAccounts = p.externalAccountsJson ? JSON.parse(p.externalAccountsJson) : [];
@@ -58,13 +71,13 @@ export async function GET() {
         externalAccounts = [];
       }
 
-      return {
+      enrichedParties.push({
         ...p,
         receivableBalance: roundMoney(rec),
         payableBalance: roundMoney(pay),
         externalAccounts,
-      };
-    });
+      });
+    }
 
     return NextResponse.json({
       success: true,

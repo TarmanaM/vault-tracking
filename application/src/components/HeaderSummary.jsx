@@ -36,30 +36,40 @@ export default function HeaderSummary({ summary }) {
   if (!summary) return null;
 
   return (
-    <Card sx={{ bgcolor: "#1E293B", color: "#FFFFFF", mb: 3 }}>
-      <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <Box>
+    <Card sx={{ bgcolor: "#1E293B", color: "#FFFFFF", mb: { xs: 2, sm: 3 } }}>
+      <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 1 }}>
+          <Box sx={{ minWidth: 0 }}>
             <Stack direction="row" spacing={0.5} alignItems="center">
-              <Typography variant="overline" sx={{ color: "#94A3B8", letterSpacing: 1.2, fontWeight: 700 }}>
+              <Typography variant="overline" sx={{ color: "#94A3B8", letterSpacing: 1.2, fontWeight: 700, fontSize: { xs: "0.68rem", sm: "0.75rem" } }}>
                 TOTAL NET WEALTH
               </Typography>
-              <IconButton size="small" onClick={handleInfoClick} sx={{ color: "#94A3B8", p: 0.5 }}>
+              <IconButton size="small" onClick={handleInfoClick} sx={{ color: "#94A3B8", p: 0.25 }}>
                 <InfoOutlinedIcon fontSize="small" />
               </IconButton>
             </Stack>
-            <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, letterSpacing: -0.5 }}>
+            <Typography
+              variant="h4"
+              sx={{
+                fontWeight: 800,
+                mt: 0.25,
+                letterSpacing: -0.5,
+                fontSize: { xs: "1.4rem", sm: "2rem" },
+              }}
+            >
               <MoneyValue value={summary.netTotalWealth} includeCents allowTapToggle />
             </Typography>
           </Box>
 
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={0.75} flexShrink={0}>
             <Button
               variant="outlined"
               size="small"
               onClick={openExportDialog}
               startIcon={<FileDownloadOutlinedIcon />}
               sx={{
+                px: { xs: 1, sm: 1.5 },
+                fontSize: { xs: "0.72rem", sm: "0.8rem" },
                 color: "#E2E8F0",
                 borderColor: "#475569",
                 "&:hover": { borderColor: "#94A3B8", bgcolor: "rgba(255,255,255,0.05)" },
@@ -72,14 +82,19 @@ export default function HeaderSummary({ summary }) {
               size="small"
               onClick={() => openReconcileDialog(null)}
               startIcon={<SyncAltIcon />}
-              sx={{ bgcolor: "#2563EB", "&:hover": { bgcolor: "#1D4ED8" } }}
+              sx={{
+                px: { xs: 1, sm: 1.5 },
+                fontSize: { xs: "0.72rem", sm: "0.8rem" },
+                bgcolor: "#2563EB",
+                "&:hover": { bgcolor: "#1D4ED8" },
+              }}
             >
               Audit Vault
             </Button>
           </Stack>
         </Box>
 
-        <Divider sx={{ my: 2, borderColor: "rgba(255,255,255,0.1)" }} />
+        <Divider sx={{ my: { xs: 1.25, sm: 2 }, borderColor: "rgba(255,255,255,0.1)" }} />
 
         {/* Quick Wealth Distribution Metrics */}
         <Stack direction="row" spacing={{ xs: 2, sm: 4 }} sx={{ overflowX: "auto", pb: 0.5 }}>

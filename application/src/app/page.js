@@ -38,22 +38,28 @@ export default function DashboardPage() {
     );
   }
 
+  const reminders = data.pendingReminders || [];
+
   return (
-    <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 } }}>
+    <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 }, px: { xs: 1.5, sm: 3 } }}>
       <HeaderSummary summary={data.summary} />
 
-      <VaultRibbon vaults={data.vaults || []} />
+      <LayerConsumptionOverview currentMonth={data.summary?.currentMonth} />
 
-      <PendingRemindersBanner reminders={data.pendingReminders || []} />
+      {reminders.length > 0 && <PendingRemindersBanner reminders={reminders} />}
 
       <SmartActionCards
         actionCards={data.actionCards || []}
         searchableCards={data.searchableCards || []}
         vaults={data.vaults || []}
         parties={data.parties || []}
+        defaultMonthlyVaultId={data.defaultMonthlyVaultId || null}
+        defaultCashVaultId={data.defaultCashVaultId || null}
       />
 
-      <LayerConsumptionOverview currentMonth={data.summary?.currentMonth} />
+      {reminders.length === 0 && <PendingRemindersBanner reminders={reminders} />}
+
+      <VaultRibbon vaults={data.vaults || []} />
     </Container>
   );
 }

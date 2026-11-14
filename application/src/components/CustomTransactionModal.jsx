@@ -30,6 +30,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import CurrencyTextField from "@/components/CurrencyTextField";
 import MoneyValue from "@/components/MoneyValue";
+import CoinExpenseControls from "@/components/CoinExpenseControls";
+import { isPhysicalCashVault } from "@/lib/vaultHelpers";
 
 const NATURE_OPTIONS = [
   { value: "EXPENSE", label: "Expense (Pengeluaran)" },
@@ -53,6 +55,8 @@ export default function CustomTransactionModal({
   categories = [],
   parties = [],
   latestCheckpointsByVault = {},
+  defaultMonthlyVaultId = null,
+  defaultCashVaultId = null,
 }) {
   const {
     transactionDialog,
@@ -71,6 +75,8 @@ export default function CustomTransactionModal({
   const [partyId, setPartyId] = useState("");
   const [grossAmount, setGrossAmount] = useState("");
   const [taxFeeAmount, setTaxFeeAmount] = useState("");
+  const [coinMode, setCoinMode] = useState("NONE"); // "NONE" | "SPLIT" | "CHANGE"
+  const [coinUsedAmount, setCoinUsedAmount] = useState("");
   const [coinChangeAmount, setCoinChangeAmount] = useState("");
   const [transactionDate, setTransactionDate] = useState(() => getLocalNowParts().dateStr);
   const [transactionTime, setTransactionTime] = useState(() => getLocalNowParts().timeStr);
@@ -91,12 +97,20 @@ export default function CustomTransactionModal({
 
     const preset = transactionDialog.presetCard;
     const { dateStr, timeStr } = getLocalNowParts();
+    const resolvedDefaultVaultId =
+      defaultMonthlyVaultId || defaultCashVaultId || vaults[0]?.id || "";
 
     if (preset) {
       setTitle(preset.title || "");
       setNature(preset.nature || "EXPENSE");
       setPayableMode(preset.payableMode || "EXPENSE_TALANG");
-      setSourceVaultId(preset.sourceVaultId ? String(preset.sourceVaultId) : vaults[0]?.id ? String(vaults[0].id) : "");
+      setSourceVaultId(
+        preset.sourceVaultId
+          ? String(preset.sourceVaultId)
+          : resolvedDefaultVaultId
+          ? String(resolvedDefaultVaultId)
+          : ""
+      );
       setTargetVaultId(preset.targetVaultId ? String(preset.targetVaultId) : "");
       setCategoryId(preset.categoryId ? String(preset.categoryId) : "");
       setPartyId(
@@ -108,7 +122,11 @@ export default function CustomTransactionModal({
       );
       setGrossAmount(preset.grossAmount ? Number(preset.grossAmount) : "");
       setTaxFeeAmount(preset.taxFeeAmount ? Number(preset.taxFeeAmount) : "");
-      setCoinChangeAmount(preset.coinChangeAmount ? Number(preset.coinChangeAmount) : "");
+      const presetCoinUsed = preset.coinUsedAmount ? Number(preset.coinUsedAmount) : "";
+      const presetCoinChange = preset.coinChangeAmount ? Number(preset.coinChangeAmount) : "";
+      setCoinUsedAmount(presetCoinUsed);
+      setCoinChangeAmount(presetCoinChange);
+      setCoinMode(presetCoinUsed ? "SPLIT" : presetCoinChange ? "CHANGE" : "NONE");
       setReferenceDebtId(preset.referenceDebtId ? String(preset.referenceDebtId) : "");
       setCounterpartyAccountNote(preset.counterpartyAccountNote || "");
       setNotes(preset.notes || "");
@@ -118,12 +136,15 @@ export default function CustomTransactionModal({
       setTitle("");
       setNature("EXPENSE");
       setPayableMode("EXPENSE_TALANG");
-      setSourceVaultId(vaults[0]?.id ? String(vaults[0].id) : "");
-      setTargetVaultId(vaults[1]?.id ? String(vaults[1].id) : "");
+      setSourceVaultId(resolvedDefaultVaultId ? String(resolvedDefaultVaultId) : "");
+      const fallbackTarget = vaults.find((v) => String(v.id) !== String(resolvedDefaultVaultId));
+      setTargetVaultId(fallbackTarget?.id ? String(fallbackTarget.id) : "");
       setCategoryId("");
       setPartyId(selfParty?.id ? String(selfParty.id) : "");
       setGrossAmount("");
       setTaxFeeAmount("");
+      setCoinMode("NONE");
+      setCoinUsedAmount("");
       setCoinChangeAmount("");
       setReferenceDebtId("");
       setCounterpartyAccountNote("");
@@ -132,7 +153,14 @@ export default function CustomTransactionModal({
       setTransactionTime(timeStr);
     }
     setErrorMsg("");
-  }, [transactionDialog.open, transactionDialog.presetCard, vaults, selfParty]);
+  }, [
+    transactionDialog.open,
+    transactionDialog.presetCard,
+    vaults,
+    selfParty,
+    defaultMonthlyVaultId,
+    defaultCashVaultId,
+  ]);
 
   const isDebtNature =
     nature === "RECEIVABLE_LEND" ||
@@ -145,6 +173,14 @@ export default function CustomTransactionModal({
 
   const needsVaultSelection =
     nature !== "PAYABLE_BORROW" || payableMode === "CASH_LOAN";
+
+  const selectedSourceVaultObj = useMemo(
+    () => vaults.find((v) => String(v.id) === String(sourceVaultId)),
+    [vaults, sourceVaultId]
+  );
+
+  const showCoinControls =
+    nature === "EXPENSE" && isPhysicalCashVault(selectedSourceVaultObj);
 
   const selectedPartyObj = useMemo(
     () => parties.find((p) => String(p.id) === String(partyId)),
@@ -241,6 +277,14 @@ export default function CustomTransactionModal({
       return;
     }
 
+    const coinUsedVal = showCoinControls && coinMode === "SPLIT" ? Number(coinUsedAmount) || 0 : 0;
+    const coinChangeVal = showCoinControls && coinMode === "CHANGE" ? Number(coinChangeAmount) || 0 : 0;
+
+    if (coinUsedVal > amt) {
+      setErrorMsg("Coin split payment cannot exceed transaction amount.");
+      return;
+    }
+
     if (isDebtNature && (!partyId || String(partyId) === String(selfParty?.id))) {
       setErrorMsg("Please select an external contact/party (or click + Add Contact).");
       return;
@@ -271,7 +315,8 @@ export default function CustomTransactionModal({
       targetVaultId: nature === "TRANSFER" && targetVaultId ? parseInt(targetVaultId, 10) : null,
       grossAmount: amt,
       taxFeeAmount: Number(taxFeeAmount) || 0,
-      coinChangeAmount: Number(coinChangeAmount) || 0,
+      coinUsedAmount: coinUsedVal,
+      coinChangeAmount: coinChangeVal,
       transactionDate: `${transactionDate}T${transactionTime || "12:00"}:00`,
       transactionTime,
       referenceDebtId: isSettlementNature && referenceDebtId ? parseInt(referenceDebtId, 10) : null,
@@ -373,7 +418,7 @@ export default function CustomTransactionModal({
 
             {/* Amount + Admin Fee */}
             <Grid container spacing={1.5}>
-              <Grid item xs={12} sm={nature === "EXPENSE" || nature === "TRANSFER" || nature === "PAYABLE_REPAY" ? 7 : 12}>
+              <Grid size={{ xs: 12, sm: nature === "EXPENSE" || nature === "TRANSFER" || nature === "PAYABLE_REPAY" ? 7 : 12 }}>
                 <CurrencyTextField
                   label="Gross Amount"
                   value={grossAmount}
@@ -383,7 +428,7 @@ export default function CustomTransactionModal({
                 />
               </Grid>
               {(nature === "EXPENSE" || nature === "TRANSFER" || nature === "PAYABLE_REPAY") && (
-                <Grid item xs={12} sm={5}>
+                <Grid size={{ xs: 12, sm: 5 }}>
                   <CurrencyTextField
                     label="Admin Fee / Tax (Optional)"
                     value={taxFeeAmount}
@@ -483,7 +528,11 @@ export default function CustomTransactionModal({
                 variant="outlined"
                 size="small"
                 startIcon={<PersonAddAlt1OutlinedIcon />}
-                onClick={() => openAddPartyDialog((created) => setPartyId(String(created.id)))}
+                onClick={() =>
+                  openAddPartyDialog((created) => setPartyId(String(created.id)), {
+                    isDebtContact: isDebtNature,
+                  })
+                }
                 sx={{ flexShrink: 0, height: 40, fontWeight: 700 }}
               >
                 + Contact
@@ -600,13 +649,16 @@ export default function CustomTransactionModal({
               </Alert>
             )}
 
-            {/* Coin Change Input (optional for Cash purchases) */}
-            {nature === "EXPENSE" && (
-              <CurrencyTextField
-                label="Coin Change Returned to COIN Vault (Optional)"
-                value={coinChangeAmount}
-                onValueChange={(num) => setCoinChangeAmount(num)}
-                showClear
+            {/* Cash Coin Split or Coin Change Controls (Visible ONLY when Physical CASH is selected) */}
+            {showCoinControls && (
+              <CoinExpenseControls
+                grossAmount={grossAmount}
+                coinMode={coinMode}
+                onCoinModeChange={setCoinMode}
+                coinUsedAmount={coinUsedAmount}
+                onCoinUsedChange={setCoinUsedAmount}
+                coinChangeAmount={coinChangeAmount}
+                onCoinChangeAmount={setCoinChangeAmount}
               />
             )}
 

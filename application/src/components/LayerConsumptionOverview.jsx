@@ -67,25 +67,25 @@ export default function LayerConsumptionOverview({ currentMonth }) {
   ];
 
   return (
-    <Box sx={{ mb: 4 }}>
+    <Box sx={{ mb: { xs: 2.5, sm: 3.5 } }}>
       {/* Header with (i) Info Button (Rule 11) */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1.5 }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 0.5, mb: { xs: 1, sm: 1.5 } }}>
         <Stack direction="row" spacing={0.5} alignItems="center">
-          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: "#1E293B" }}>
-            Monthly Consumption by Layer ({currentMonth.monthTag})
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: "#1E293B", fontSize: { xs: "0.92rem", sm: "1rem" } }}>
+            Monthly Consumption ({currentMonth.monthTag})
           </Typography>
-          <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)} sx={{ color: "#64748B" }}>
+          <IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)} sx={{ color: "#64748B", p: 0.25 }}>
             <InfoOutlinedIcon fontSize="small" />
           </IconButton>
         </Stack>
-        <Typography variant="body2" sx={{ fontWeight: 700, color: "#2563EB" }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, color: "#2563EB", fontSize: { xs: "0.8rem", sm: "0.875rem" } }}>
           Total: <MoneyValue value={totalConsume} allowTapToggle />
         </Typography>
       </Box>
 
       {/* Income vs Consumption Pacing Bar */}
       {totalIncome > 0 && (
-        <Card sx={{ p: 2, mb: 2, bgcolor: "#F8FAFC" }}>
+        <Card sx={{ p: { xs: 1.25, sm: 2 }, mb: { xs: 1.5, sm: 2 }, bgcolor: "#F8FAFC" }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.8 }}>
             <Typography variant="caption" sx={{ fontWeight: 700, color: "#475569" }}>
               MONTHLY BUDGET PACING
@@ -110,25 +110,34 @@ export default function LayerConsumptionOverview({ currentMonth }) {
         </Card>
       )}
 
-      {/* Layer Cards (Clickable for Instant Charts - Rule 17) */}
-      <Grid container spacing={2}>
+      {/* Layer Cards (2x2 compact grid on mobile, 4-col on desktop; Clickable for Instant Charts - Rule 17) */}
+      <Grid container spacing={{ xs: 1, sm: 2 }}>
         {layers.map((layer) => (
-          <Grid item xs={12} sm={6} md={3} key={layer.key}>
-            <Card sx={{ borderLeft: `4px solid ${layer.color}` }}>
+          <Grid size={{ xs: 6, md: 3 }} key={layer.key}>
+            <Card sx={{ borderLeft: `4px solid ${layer.color}`, height: "100%" }}>
               <CardActionArea
                 onClick={() => openChartDrawer("LAYER", layer.key, layer.title)}
-                sx={{ p: 2 }}
+                sx={{ p: { xs: 1.25, sm: 2 }, height: "100%", display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "flex-start" }}
               >
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: { xs: 0.5, sm: 1 }, width: "100%", minWidth: 0 }}>
                   {layer.icon}
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: "0.85rem" }}>
+                  <Typography
+                    variant="subtitle2"
+                    sx={{ fontWeight: 700, fontSize: { xs: "0.74rem", sm: "0.85rem" } }}
+                    noWrap
+                  >
                     {layer.title}
                   </Typography>
                 </Stack>
-                <Typography variant="h6" sx={{ fontWeight: 800, color: "#0F172A", mb: 0.3 }}>
+                <Typography variant="h6" sx={{ fontWeight: 800, color: "#0F172A", mb: 0.25, fontSize: { xs: "0.98rem", sm: "1.2rem" } }}>
                   <MoneyValue value={layer.amount} allowTapToggle />
                 </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.7rem" }}>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  noWrap
+                  sx={{ display: "block", width: "100%", fontSize: { xs: "0.64rem", sm: "0.7rem" } }}
+                >
                   {layer.desc}
                 </Typography>
               </CardActionArea>
@@ -138,7 +147,7 @@ export default function LayerConsumptionOverview({ currentMonth }) {
 
         {/* Cash Shortage Amber Warning Card (#13) */}
         {Number(currentMonth.cashShortageLost) > 0 && (
-          <Grid item xs={12}>
+          <Grid size={12}>
             <Card sx={{ borderLeft: "4px solid #D97706", bgcolor: "#FFFBEB" }}>
               <CardActionArea
                 onClick={() => openChartDrawer("LAYER", "RECONCILIATION_LOST", "Unaccounted Cash Shortage")}

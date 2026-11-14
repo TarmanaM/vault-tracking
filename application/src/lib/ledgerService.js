@@ -288,6 +288,7 @@ export async function createTransaction(payload) {
       targetVaultId = null,
       grossAmount,
       taxFeeAmount = 0,
+      coinUsedAmount = 0,
       coinChangeAmount = 0,
       transactionDate = new Date(),
       transactionTime = null,
@@ -325,10 +326,23 @@ export async function createTransaction(payload) {
     const monthTag = `${txDate.toLocaleString("en-US", { month: "short" })},${txDate.getFullYear()}`;
     const grossDec = roundMoney(grossAmount);
     const taxDec = roundMoney(taxFeeAmount);
-    const changeDec = roundMoney(coinChangeAmount);
+    const coinUsedDec = roundMoney(coinUsedAmount || 0);
+    const changeDec = roundMoney(coinChangeAmount || 0);
 
     if (grossDec.lessThanOrEqualTo(0)) {
       throw new Error("Transaction amount must be greater than zero");
+    }
+    if (coinUsedDec.lessThan(0) || changeDec.lessThan(0)) {
+      throw new Error("Coin amounts cannot be negative");
+    }
+    if (coinUsedDec.greaterThan(0) && changeDec.greaterThan(0)) {
+      throw new Error("Cannot combine Coin Split payment and Coin Change returned on one transaction");
+    }
+    if ((coinUsedDec.greaterThan(0) || changeDec.greaterThan(0)) && nature !== "EXPENSE") {
+      throw new Error("Coin split and coin change options only apply to EXPENSE transactions");
+    }
+    if (coinUsedDec.greaterThan(grossDec)) {
+      throw new Error("Coin split payment cannot exceed total transaction amount");
     }
 
     // #15 Auto-Detect Retroactive if txDate is earlier than the latest checkpoint of sourceVault
@@ -384,6 +398,19 @@ export async function createTransaction(payload) {
     // Save external bank/e-wallet note for future autocomplete if provided
     if (counterpartyAccountNote) {
       await rememberPartyExternalAccount(tx, party, counterpartyAccountNote);
+    }
+
+    // Promote party to debt contact automatically whenever recording any debt ledger nature
+    const isDebtTxNature =
+      nature === "RECEIVABLE_LEND" ||
+      nature === "RECEIVABLE_COLLECT" ||
+      nature === "PAYABLE_BORROW" ||
+      nature === "PAYABLE_REPAY";
+    if (isDebtTxNature && !party.isDebtContact && party.partyType !== "SELF") {
+      await tx.party.update({
+        where: { id: party.id },
+        data: { isDebtContact: true },
+      });
     }
 
     // Helper: decide whether ending vault balance should mutate or be absorbed into checkpoint
@@ -459,40 +486,88 @@ export async function createTransaction(payload) {
 
     // 2. Create Transaction Legs & Debt Ledger Entries depending on nature
     if (nature === "EXPENSE" || nature === "RECEIVABLE_LEND" || nature === "PAYABLE_REPAY") {
-      const delta = grossDec.negated();
-      const shouldMutateLive = await handleAbsorptionIfBackdated(delta);
+      // Cash + Coin split reduces CASH by (gross - coinUsed); coin change increases CASH outflow by (gross + changeDec)
+      const primaryOutflowDec =
+        nature === "EXPENSE" && coinUsedDec.greaterThan(0)
+          ? subMoney(grossDec, coinUsedDec)
+          : nature === "EXPENSE" && changeDec.greaterThan(0)
+          ? addMoney(grossDec, changeDec)
+          : grossDec;
 
-      let newSourceBalance = toDecimal(sourceVault.currentBalance);
-      if (shouldMutateLive) {
-        newSourceBalance = subMoney(sourceVault.currentBalance, grossDec);
-        await tx.vault.update({
-          where: { id: sourceVault.id },
-          data: { currentBalance: roundMoney(newSourceBalance) },
+      if (primaryOutflowDec.greaterThan(0)) {
+        const delta = primaryOutflowDec.negated();
+        const shouldMutateLive = await handleAbsorptionIfBackdated(delta);
+
+        let newSourceBalance = toDecimal(sourceVault.currentBalance);
+        if (shouldMutateLive) {
+          newSourceBalance = subMoney(sourceVault.currentBalance, primaryOutflowDec);
+          await tx.vault.update({
+            where: { id: sourceVault.id },
+            data: { currentBalance: roundMoney(newSourceBalance) },
+          });
+        }
+
+        await tx.transactionLeg.create({
+          data: {
+            transactionId: createdTx.id,
+            vaultId: sourceVault.id,
+            legRole: "PRIMARY",
+            debitIn: toDecimal(0),
+            creditOut: primaryOutflowDec,
+            netMutation: delta,
+            runningVaultBalance: roundMoney(newSourceBalance),
+            runningTotalWealth: roundMoney(newSourceBalance),
+          },
         });
       }
 
-      await tx.transactionLeg.create({
-        data: {
-          transactionId: createdTx.id,
-          vaultId: sourceVault.id,
-          legRole: "PRIMARY",
-          debitIn: toDecimal(0),
-          creditOut: grossDec,
-          netMutation: delta,
-          runningVaultBalance: roundMoney(newSourceBalance),
-          runningTotalWealth: roundMoney(newSourceBalance),
-        },
-      });
+      // Coin split outflow (e.g. Cash + Coin combined payment) or coin change inflow (kembalian koin)
+      if (coinUsedDec.greaterThan(0) || changeDec.greaterThan(0)) {
+        const coinVault = await tx.vault.findFirst({
+          where: { OR: [{ code: "COIN" }, { vaultType: "PHYSICAL_COIN" }] },
+        });
+        if (!coinVault) {
+          throw new Error("COIN vault not found for coin transaction");
+        }
 
-      // Split coin change if paying with Cash and receiving Coins
-      if (changeDec.greaterThan(0)) {
-        const coinVault = await tx.vault.findFirst({ where: { code: "COIN" } });
-        if (coinVault) {
-          const newCoinBalance = addMoney(coinVault.currentBalance, changeDec);
-          await tx.vault.update({
-            where: { id: coinVault.id },
-            data: { currentBalance: roundMoney(newCoinBalance) },
+        const coinCp = await tx.vaultCheckpoint.findFirst({
+          where: { vaultId: coinVault.id },
+          orderBy: { checkpointTimestamp: "desc" },
+        });
+        const isCoinBackdated = Boolean(coinCp && txDate < coinCp.checkpointTimestamp);
+
+        if (coinUsedDec.greaterThan(0)) {
+          const coinDelta = coinUsedDec.negated();
+          let newCoinBalance = toDecimal(coinVault.currentBalance);
+          if (!isCoinBackdated) {
+            newCoinBalance = subMoney(coinVault.currentBalance, coinUsedDec);
+            await tx.vault.update({
+              where: { id: coinVault.id },
+              data: { currentBalance: roundMoney(newCoinBalance) },
+            });
+          }
+
+          await tx.transactionLeg.create({
+            data: {
+              transactionId: createdTx.id,
+              vaultId: coinVault.id,
+              legRole: "COIN_SPLIT",
+              debitIn: toDecimal(0),
+              creditOut: coinUsedDec,
+              netMutation: coinDelta,
+              runningVaultBalance: roundMoney(newCoinBalance),
+              runningTotalWealth: roundMoney(newCoinBalance),
+            },
           });
+        } else if (changeDec.greaterThan(0)) {
+          let newCoinBalance = toDecimal(coinVault.currentBalance);
+          if (!isCoinBackdated) {
+            newCoinBalance = addMoney(coinVault.currentBalance, changeDec);
+            await tx.vault.update({
+              where: { id: coinVault.id },
+              data: { currentBalance: roundMoney(newCoinBalance) },
+            });
+          }
 
           await tx.transactionLeg.create({
             data: {
@@ -829,6 +904,12 @@ export async function offsetPartyDebts({
     const pId = parseInt(partyId, 10);
     const party = await tx.party.findUnique({ where: { id: pId } });
     if (!party) throw new Error("Party not found");
+    if (!party.isDebtContact && party.partyType !== "SELF") {
+      await tx.party.update({
+        where: { id: pId },
+        data: { isDebtContact: true },
+      });
+    }
 
     const recWhere = {
       partyId: pId,
@@ -1016,7 +1097,8 @@ export async function deleteAndReverseTransaction(txId) {
       // Revert backdated checkpoint deduction tracking if possible
       const cp = await tx.vaultCheckpoint.findUnique({ where: { id: transaction.linkedCheckpointId } });
       if (cp) {
-        const absAmt = toDecimal(transaction.grossAmount);
+        const primaryLeg = transaction.legs.find((l) => l.legRole === "PRIMARY");
+        const absAmt = primaryLeg ? toDecimal(primaryLeg.netMutation).abs() : toDecimal(transaction.grossAmount);
         const newDed = subMoney(cp.retroactiveDeductionTotal, absAmt);
         await tx.vaultCheckpoint.update({
           where: { id: cp.id },

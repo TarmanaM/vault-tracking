@@ -322,7 +322,7 @@ export default function AppLayout({ children }) {
           flexGrow: 1,
           minWidth: 0,
           pt: "72px",
-          pb: isMobile ? "72px" : "32px",
+          pb: isMobile ? "96px" : "32px",
           px: { xs: 1.5, sm: 3 },
           width: "100%",
           maxWidth: "100vw",
@@ -385,6 +385,8 @@ export default function AppLayout({ children }) {
         categories={data?.categories || []}
         parties={data?.parties || []}
         latestCheckpointsByVault={data?.latestCheckpointsByVault || {}}
+        defaultMonthlyVaultId={data?.defaultMonthlyVaultId || null}
+        defaultCashVaultId={data?.defaultCashVaultId || null}
       />
       <AutoChartDrawer />
     </Box>

@@ -487,13 +487,27 @@ async function main() {
       }
     }
 
-    // 6. Update Final Balances for Vaults
+    // 6. Update Final Balances for Vaults & mark debt-active Parties
     for (const [vaultId, balance] of Object.entries(vaultBalances)) {
       await tx.vault.update({
         where: { id: parseInt(vaultId, 10) },
         data: { currentBalance: balance },
       });
     }
+
+    await tx.party.updateMany({
+      where: {
+        partyType: { not: "SELF" },
+        OR: [
+          { debtLedgerEntries: { some: {} } },
+          { receivableBalance: { gt: 0 } },
+          { payableBalance: { gt: 0 } },
+          { heldFundBalance: { gt: 0 } },
+          { partyType: { in: ["FAMILY", "FRIEND", "LENDER"] } },
+        ],
+      },
+      data: { isDebtContact: true },
+    });
 
     // 7. Seed / Update Habit Statistics
     for (const cardUsage of Object.values(cardUsageMap)) {

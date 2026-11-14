@@ -29,6 +29,7 @@ export async function POST(request) {
       partyType = "FRIEND", // FRIEND, FAMILY, EMPLOYER, INSTITUTION, LENDER
       alias = "",
       externalAccount = "",
+      isDebtContact = false,
     } = body;
 
     if (!name || !name.trim()) {
@@ -57,6 +58,7 @@ export async function POST(request) {
         code,
         name: cleanName,
         partyType,
+        isDebtContact: Boolean(isDebtContact),
         aliasesJson: aliases.length > 0 ? JSON.stringify(aliases) : null,
         externalAccountsJson: externalAccounts.length > 0 ? JSON.stringify(externalAccounts) : null,
       },

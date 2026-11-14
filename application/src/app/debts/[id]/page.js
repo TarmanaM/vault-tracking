@@ -305,7 +305,7 @@ export default function PartyDebtDetailPage() {
           </Box>
 
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <Box sx={{ p: 2, borderRadius: 2, bgcolor: "#EFF6FF", border: "1px solid #BFDBFE" }}>
                 <Typography variant="caption" sx={{ fontWeight: 700, color: "#1E40AF", display: "block" }}>
                   PIUTANG (RECEIVABLE — THEY OWE YOU)
@@ -315,7 +315,7 @@ export default function PartyDebtDetailPage() {
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <Box sx={{ p: 2, borderRadius: 2, bgcolor: "#FEF2F2", border: "1px solid #FECACA" }}>
                 <Typography variant="caption" sx={{ fontWeight: 700, color: "#991B1B", display: "block" }}>
                   UTANG (PAYABLE — YOU OWE THEM)
@@ -357,7 +357,7 @@ export default function PartyDebtDetailPage() {
             </Popover>
 
             <Grid container spacing={2} sx={{ mb: 2 }}>
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <Card variant="outlined" sx={{ p: 1.5, bgcolor: "#FFFFFF" }}>
                   <Typography variant="caption" sx={{ fontWeight: 800, color: "#1E40AF", display: "block", mb: 1 }}>
                     1. SELECT RECEIVABLES TO OFFSET (Pool: <MoneyValue value={effectiveRecPool} />)
@@ -393,7 +393,7 @@ export default function PartyDebtDetailPage() {
                 </Card>
               </Grid>
 
-              <Grid item xs={12} md={6}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <Card variant="outlined" sx={{ p: 1.5, bgcolor: "#FFFFFF" }}>
                   <Typography variant="caption" sx={{ fontWeight: 800, color: "#991B1B", display: "block", mb: 1 }}>
                     2. SELECT PAYABLES TO OFFSET (Pool: <MoneyValue value={effectivePayPool} />)
@@ -485,7 +485,7 @@ export default function PartyDebtDetailPage() {
 
       {/* Open Receivables & Open Payables Detailed Lists */}
       <Grid container spacing={2.5} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: "100%" }}>
             <CardContent>
               <Typography variant="subtitle1" sx={{ fontWeight: 800, color: "#1E40AF", mb: 1.5 }}>
@@ -561,7 +561,7 @@ export default function PartyDebtDetailPage() {
           </Card>
         </Grid>
 
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card sx={{ height: "100%" }}>
             <CardContent>
               <Typography variant="subtitle1" sx={{ fontWeight: 800, color: "#991B1B", mb: 1.5 }}>

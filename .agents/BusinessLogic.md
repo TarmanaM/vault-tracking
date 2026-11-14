@@ -47,9 +47,11 @@ Ketika user baru ingat ada transaksi yang terjadi sebelum perhitungan Dana Awal 
 
 User sering membayar dengan uang kertas (`CASH`) lalu menerima kembalian koin (`COIN`) dan lupa kapan pastinya konversi tersebut terjadi. Sistem menyediakan 2 jalur solusi:
 
-1. **Saat Input Transaksi (Inline Split Coin Change)**:
-   - Pada pembayaran menggunakan `CASH`, tersedia opsi cepat *"Coin Change to COIN"*.
-   - Contoh: Belanja Rp 18.500 bayar pakai uang kertas Rp 20.000 -> Sistem mencatat `EXPENSE` Rp 18.500 dari `CASH` dan `TRANSFER` Rp 1.500 dari `CASH` ke `COIN` dalam satu grup transaksi.
+1. **Saat Input Transaksi Tunai (`CASH` Only — 2 Mode Koin)**:
+   - Opsi koin hanya tampil ketika sumber dana `EXPENSE` adalah Physical `CASH`.
+   - **Cash + Coin Split Payment (`coinUsedAmount`)**: Contoh makan Rp 45.300 dibayar kertas Rp 44.000 (`CASH`) + koin Rp 1.300 (`COIN`) -> `CASH` berkurang `gross - coinUsed` (`-44.000`, `PRIMARY`), `COIN` berkurang `-coinUsed` (`-1.300`, `COIN_SPLIT`), `Consume = -45.300`.
+   - **Got Coin Change (`coinChangeAmount`)**: Contoh harga Rp 47.400, bayar kertas Rp 50.000, kembali kertas Rp 2.000 + koin Rp 600 -> `CASH` berkurang `gross + coinChange` (`-48.000`, `PRIMARY`), `COIN` bertambah `+coinChange` (`+600`, `COIN_CHANGE`), `Consume = -47.400`.
+   - **Dynamic Default Vault**: Action Card memakai vault tersering pada card tersebut -> `card.defaultVaultId` -> vault tersering bulan ini -> `CASH`; sedangkan `Custom Transaction` kosong memakai vault tersering bulan ini -> `CASH`.
 2. **Saat Cek Fisik (Auto Cross-Vault Offset antara Cash & Coin)**:
    - Saat user menghitung fisik `CASH` (terbagi atas sub-dompet `D1` dan `D2`) serta kepingan `COIN` (`1000`, `500`, `200`, `100`):
    - Jika `CASH` mengalami selisih kurang (misal `-Rp 11.000`) dan `COIN` mengalami selisih lebih (`+Rp 11.000`), sistem otomatis mendeteksi pergeseran tersebut dan menawarkan 1-klik **Convert Cash Shortage to Coin Change (`TRANSFER`)** sehingga tidak dianggap sebagai uang hilang.

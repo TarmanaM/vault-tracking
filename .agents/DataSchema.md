@@ -43,7 +43,7 @@ Kategori fungsional (*Parkir*, *BBM/Bensin*, *Makan Utama*, *Kopi & Minuman*, *J
    - Mendukung presisi desimal sen (`Decimal(18,2)`), flag `has_sub_containers` (untuk `CASH`: Dompet D1/D2), dan `has_denominations` (untuk `COIN`: keping 1000, 500, 200, 100).
 2. **`vault_sub_containers`**: Menyimpan sub-dompet fisik (seperti `D1` dan `D2` pada `CASH`) untuk mempermudah cek fisik tanpa memecah rekening utama di buku besar.
 3. **`parties`**: Menyimpan subjek/peran transaksi (`ISA` sebagai `SELF`, `IBRAHIM` / Dada, `FERNANDO` / Nando, `SLAMET` / Amet, `DDV`, `TASPEN`, `SHOPEE_PAYLATER`).
-   - Menyimpan cache `net_receivable_balance` dan `held_fund_balance` (dana hak tertahan).
+   - Menyimpan cache `receivable_balance`, `payable_balance`, `net_receivable_balance`, `held_fund_balance`, serta flag `is_debt_contact` (`true` hanya untuk kontak sub-ledger `/debts` atau yang memiliki histori utang/piutang).
 4. **`categories`**: Master kategori beserta mapping default Layer 1, Layer 2, dan kode akun akuntansi (`coa_code`).
 5. **`action_cards`**: Template kartu input cepat tanpa OCR/AI. Menyimpan `default_vault_id`, `default_amount`, `quick_amounts_json`, `one_tap_submit`, dan `expected_cadence`.
 6. **`card_habit_stats`**: Profil statistik penggunaan per Card (`hour_counts_json` [24 slot], `dow_counts_json` [7 slot], `avg_interval_days`, `std_interval_days`, `last_used_timestamp`).

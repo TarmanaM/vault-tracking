@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { calculateCardScore } from "@/lib/habitEngine";
 import { toDecimal, addMoney, subMoney, roundMoney } from "@/lib/money";
+import { isPhysicalCashVault, isSelectableSpendVault, sortVaultsByBalanceDesc } from "@/lib/vaultHelpers";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,13 @@ export async function GET() {
     const now = new Date();
     let currentMonthTag = `${now.toLocaleString("en-US", { month: "short" })},${now.getFullYear()}`;
 
-    // 1. Fetch all active vaults
-    const vaults = await prisma.vault.findMany({
+    // 1. Fetch all active vaults sorted descending by current balance (#5)
+    const rawVaults = await prisma.vault.findMany({
       where: { isActive: true },
       include: { subContainers: true },
       orderBy: { sortOrder: "asc" },
     });
+    const vaults = sortVaultsByBalanceDesc(rawVaults);
 
     // 2. Fetch all active parties with separate receivable/payable balances
     const rawParties = await prisma.party.findMany({
@@ -48,10 +50,46 @@ export async function GET() {
       },
     });
 
+    // Determine most-used primary vault per Action Card (#4 dynamic habit default)
+    const cardTxHistory = await prisma.transaction.findMany({
+      where: {
+        actionCardId: { not: null },
+        nature: { not: "INITIAL_FUND" },
+      },
+      select: {
+        actionCardId: true,
+        legs: {
+          where: { legRole: "PRIMARY" },
+          select: { vaultId: true },
+        },
+      },
+    });
+    const cardVaultFreq = new Map();
+    for (const ctx of cardTxHistory) {
+      const pLeg = ctx.legs?.[0];
+      if (!ctx.actionCardId || !pLeg) continue;
+      if (!cardVaultFreq.has(ctx.actionCardId)) {
+        cardVaultFreq.set(ctx.actionCardId, new Map());
+      }
+      const counts = cardVaultFreq.get(ctx.actionCardId);
+      counts.set(pLeg.vaultId, (counts.get(pLeg.vaultId) || 0) + 1);
+    }
+
     const scoredAllCards = rawActionCards
       .map((card) => {
         const score = calculateCardScore(card, now);
-        return { ...card, dynamicScore: score };
+        let habitVaultId = null;
+        const vCounts = cardVaultFreq.get(card.id);
+        if (vCounts && vCounts.size > 0) {
+          let bestCount = -1;
+          for (const [vId, cnt] of vCounts.entries()) {
+            if (cnt > bestCount) {
+              bestCount = cnt;
+              habitVaultId = vId;
+            }
+          }
+        }
+        return { ...card, dynamicScore: score, habitVaultId };
       })
       .sort((a, b) => b.dynamicScore - a.dynamicScore);
 
@@ -97,7 +135,13 @@ export async function GET() {
     // 5. Current Month Consumption Breakdown by Layer (fallback to latest tx month if current month empty)
     let monthTransactions = await prisma.transaction.findMany({
       where: { monthTag: currentMonthTag },
-      include: { category: true },
+      include: {
+        category: true,
+        legs: {
+          where: { legRole: "PRIMARY" },
+          select: { vaultId: true },
+        },
+      },
     });
 
     if (monthTransactions.length === 0) {
@@ -108,10 +152,38 @@ export async function GET() {
         currentMonthTag = latestTx.monthTag;
         monthTransactions = await prisma.transaction.findMany({
           where: { monthTag: currentMonthTag },
-          include: { category: true },
+          include: {
+            category: true,
+            legs: {
+              where: { legRole: "PRIMARY" },
+              select: { vaultId: true },
+            },
+          },
         });
       }
     }
+
+    const selectableVaultIds = new Set(vaults.filter(isSelectableSpendVault).map((v) => v.id));
+    const monthlyVaultCounts = new Map();
+    for (const tx of monthTransactions) {
+      if (tx.nature === "INITIAL_FUND") continue;
+      const primaryLeg = tx.legs?.[0];
+      if (primaryLeg && selectableVaultIds.has(primaryLeg.vaultId)) {
+        monthlyVaultCounts.set(primaryLeg.vaultId, (monthlyVaultCounts.get(primaryLeg.vaultId) || 0) + 1);
+      }
+    }
+
+    let topMonthlyVaultId = null;
+    let maxMonthVaultUses = -1;
+    for (const [vId, cnt] of monthlyVaultCounts.entries()) {
+      if (cnt > maxMonthVaultUses) {
+        maxMonthVaultUses = cnt;
+        topMonthlyVaultId = vId;
+      }
+    }
+    const cashVaultObj = vaults.find((v) => isPhysicalCashVault(v)) || null;
+    const defaultCashVaultId = cashVaultObj?.id || null;
+    const defaultMonthlyVaultId = topMonthlyVaultId || defaultCashVaultId || vaults[0]?.id || null;
 
     let mandatoryExpense = toDecimal(0);
     let variableEssentialExpense = toDecimal(0);
@@ -194,6 +266,8 @@ export async function GET() {
           },
         },
         vaults,
+        defaultMonthlyVaultId,
+        defaultCashVaultId,
         parties,
         actionCards: recommendedCards,
         searchableCards,

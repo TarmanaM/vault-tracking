@@ -84,6 +84,7 @@ model Party {
   payableBalance       Decimal  @default(0) // Separate payable total Isa owes to party
   externalAccountsJson String?  // JSON array of counterparty bank/wallet accounts e.g. ["BRI - Amet"]
   heldFundBalance      Decimal  @default(0) // Undisbursed third-party entitlement (e.g. Taspen/Dada)
+  isDebtContact        Boolean  @default(false) // Shows party inside /debts sub-ledger when added as debt contact or holding debt history
   isActive             Boolean  @default(true)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
