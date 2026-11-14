@@ -31,11 +31,21 @@ import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
 import SyncAltIcon from "@mui/icons-material/SyncAlt";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import VisibilityOffOutlinedIcon from "@mui/icons-material/VisibilityOffOutlined";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Tooltip } from "@mui/material";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import { useQuery } from "@tanstack/react-query";
-import { formatRupiah } from "@/lib/money";
+import MoneyValue from "@/components/MoneyValue";
+import ToastProvider from "@/components/ToastProvider";
+import ReconcileModal from "@/components/ReconcileModal";
+import ExportModal from "@/components/ExportModal";
+import AddPartyModal from "@/components/AddPartyModal";
+import ManageCardsModal from "@/components/ManageCardsModal";
+import CustomTransactionModal from "@/components/CustomTransactionModal";
+import AutoChartDrawer from "@/components/AutoChartDrawer";
 
 const DRAWER_WIDTH = 260;
 
@@ -58,6 +68,10 @@ export default function AppLayout({ children }) {
 
   const openReconcileDialog = useLedgerStore((s) => s.openReconcileDialog);
   const openExportDialog = useLedgerStore((s) => s.openExportDialog);
+  const isCompactNumbers = useLedgerStore((s) => s.isCompactNumbers);
+  const toggleCompactNumbers = useLedgerStore((s) => s.toggleCompactNumbers);
+  const isPrivacyHidden = useLedgerStore((s) => s.isPrivacyHidden);
+  const togglePrivacyHidden = useLedgerStore((s) => s.togglePrivacyHidden);
 
   // Fetch quick net wealth for the top header badge
   const { data } = useQuery({
@@ -115,7 +129,10 @@ export default function AppLayout({ children }) {
       {/* Main Navigation Links */}
       <List sx={{ px: 1.5, py: 2, flexGrow: 1 }}>
         {navItems.map((item) => {
-          const isActive = pathname === item.path;
+          const isActive =
+            item.path === "/"
+              ? pathname === "/"
+              : pathname === item.path || pathname.startsWith(`${item.path}/`);
           return (
             <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton
@@ -205,22 +222,57 @@ export default function AppLayout({ children }) {
             </IconButton>
 
             <Typography variant="h6" sx={{ fontWeight: 800, fontSize: { xs: "1rem", sm: "1.2rem" } }}>
-              {navItems.find((n) => n.path === pathname)?.label || "Vault Tracking"}
+              {navItems.find((n) =>
+                n.path === "/"
+                  ? pathname === "/"
+                  : pathname === n.path || pathname.startsWith(`${n.path}/`)
+              )?.label || "Vault Tracking"}
             </Typography>
           </Stack>
 
-          {/* Quick Net Wealth Pill Badge */}
-          {netWealth !== undefined && (
-            <Chip
-              label={formatRupiah(netWealth)}
-              component={Link}
-              href="/analytics"
-              clickable
-              color="primary"
-              variant="outlined"
-              sx={{ fontWeight: 800, fontSize: "0.8rem", height: 28, borderColor: "#BFDBFE", bgcolor: "#EFF6FF" }}
-            />
-          )}
+          {/* Header Controls: Compact Format Toggle (#7), Privacy Eye (#8), Net Wealth Badge */}
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Tooltip title={isCompactNumbers ? "Compact mode (1jt / 59.5k). Tap for exact Rp" : "Exact Rupiah mode. Tap for compact"} arrow>
+              <Chip
+                label={isCompactNumbers ? "1jt" : "Rp Full"}
+                size="small"
+                clickable
+                onClick={toggleCompactNumbers}
+                variant="outlined"
+                sx={{
+                  fontWeight: 700,
+                  fontSize: "0.72rem",
+                  height: 26,
+                  borderColor: "#CBD5E1",
+                  color: "#475569",
+                  bgcolor: "#F8FAFC",
+                }}
+              />
+            </Tooltip>
+
+            <Tooltip title={isPrivacyHidden ? "Show balances (Privacy Mode ON)" : "Hide balances (Privacy Mode)"} arrow>
+              <IconButton
+                size="small"
+                onClick={togglePrivacyHidden}
+                color={isPrivacyHidden ? "warning" : "default"}
+                aria-label="Toggle privacy mode"
+              >
+                {isPrivacyHidden ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+
+            {netWealth !== undefined && (
+              <Chip
+                label={<MoneyValue value={netWealth} />}
+                component={Link}
+                href="/analytics"
+                clickable
+                color="primary"
+                variant="outlined"
+                sx={{ fontWeight: 800, fontSize: "0.78rem", height: 28, borderColor: "#BFDBFE", bgcolor: "#EFF6FF" }}
+              />
+            )}
+          </Stack>
         </Toolbar>
       </AppBar>
 
@@ -294,21 +346,47 @@ export default function AppLayout({ children }) {
           elevation={3}
         >
           <BottomNavigation
-            value={pathname}
+            value={
+              navItems.find((n) =>
+                n.path === "/"
+                  ? pathname === "/"
+                  : pathname === n.path || pathname.startsWith(`${n.path}/`)
+              )?.path || "/"
+            }
             showLabels
             sx={{
               height: 60,
               "& .Mui-selected": { color: "#2563EB", fontWeight: 700 },
-              "& .MuiBottomNavigationAction-label": { fontSize: "0.7rem" },
+              "& .MuiBottomNavigationAction-root": { minWidth: 0, px: 0.5 },
+              "& .MuiBottomNavigationAction-label": { fontSize: "0.68rem" },
             }}
           >
             <BottomNavigationAction component={Link} href="/" label="Actions" value="/" icon={<FlashOnIcon />} />
             <BottomNavigationAction component={Link} href="/analytics" label="Journey" value="/analytics" icon={<ShowChartIcon />} />
             <BottomNavigationAction component={Link} href="/checkpoints" label="Vaults" value="/checkpoints" icon={<AccountBalanceIcon />} />
+            <BottomNavigationAction component={Link} href="/debts" label="Debts" value="/debts" icon={<PeopleAltOutlinedIcon />} />
             <BottomNavigationAction component={Link} href="/ledger" label="Ledger" value="/ledger" icon={<ReceiptLongIcon />} />
           </BottomNavigation>
         </Paper>
       )}
+
+      {/* Global Toast Queue, Confirm Dialog, & Shared Action Modals */}
+      <ToastProvider />
+      <ReconcileModal vaults={data?.vaults || []} />
+      <ExportModal />
+      <AddPartyModal />
+      <ManageCardsModal
+        vaults={data?.vaults || []}
+        categories={data?.categories || []}
+        parties={data?.parties || []}
+      />
+      <CustomTransactionModal
+        vaults={data?.vaults || []}
+        categories={data?.categories || []}
+        parties={data?.parties || []}
+        latestCheckpointsByVault={data?.latestCheckpointsByVault || {}}
+      />
+      <AutoChartDrawer />
     </Box>
   );
 }

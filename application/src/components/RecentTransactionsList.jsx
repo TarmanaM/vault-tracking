@@ -15,11 +15,13 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
-import { formatRupiah } from "@/lib/money";
+import MoneyValue from "@/components/MoneyValue";
+import { useLedgerStore } from "@/store/useLedgerStore";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 export default function RecentTransactionsList() {
   const queryClient = useQueryClient();
+  const { openConfirmDialog, enqueueToast } = useLedgerStore();
 
   const { data, isLoading } = useQuery({
     queryKey: ["transactions"],
@@ -38,9 +40,14 @@ export default function RecentTransactionsList() {
       if (!json.success) throw new Error(json.error);
       return json.data;
     },
-    onSuccess: () => {
+    onSuccess: (deleted) => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      enqueueToast(`Reversed "${deleted?.title || "transaction"}"`, { severity: "info" });
+    },
+    onError: (err) => {
+      enqueueToast(err.message, { severity: "error" });
     },
   });
 
@@ -138,16 +145,20 @@ export default function RecentTransactionsList() {
                         }}
                       >
                         {isExpense ? "-" : isIncome ? "+" : ""}
-                        {formatRupiah(tx.grossAmount)}
+                        <MoneyValue value={tx.grossAmount} allowTapToggle />
                       </Typography>
 
                       <IconButton
                         size="small"
-                        onClick={() => {
-                          if (confirm(`Reverse transaction "${tx.title}"?`)) {
-                            deleteTxMutation.mutate(tx.id);
-                          }
-                        }}
+                        onClick={() =>
+                          openConfirmDialog({
+                            title: "Reverse Transaction?",
+                            message: `Reverse transaction "${tx.title}"?`,
+                            confirmLabel: "Reverse",
+                            confirmColor: "error",
+                            onConfirm: () => deleteTxMutation.mutateAsync(tx.id),
+                          })
+                        }
                         sx={{ color: "#94A3B8", "&:hover": { color: "#EF4444" } }}
                       >
                         <DeleteOutlineIcon fontSize="small" />

@@ -1,7 +1,18 @@
-// Zustand global state for UI drawers, dialogs, and undo snackbar
+// Zustand global state for UI drawers, dialogs, display toggles, toast queue, and undo actions
 import { create } from "zustand";
 
+let nextToastId = 1;
+
 export const useLedgerStore = create((set) => ({
+  // Display preferences (#7 Compact numbers, #8 Privacy mode default unhide)
+  isCompactNumbers: true,
+  toggleCompactNumbers: () =>
+    set((state) => ({ isCompactNumbers: !state.isCompactNumbers })),
+
+  isPrivacyHidden: false,
+  togglePrivacyHidden: () =>
+    set((state) => ({ isPrivacyHidden: !state.isPrivacyHidden })),
+
   // Auto-chart drawer state
   chartDrawer: {
     open: false,
@@ -50,19 +61,85 @@ export const useLedgerStore = create((set) => ({
   closeTransactionDialog: () =>
     set({ transactionDialog: { open: false, presetCard: null } }),
 
-  // 5-second Undo snackbar state (Rule 17)
-  undoSnackbar: {
+  // Manage Smart Action Cards dialog state (#23)
+  manageCardsDialog: {
     open: false,
-    message: "",
-    transactionId: null,
   },
-  showUndoSnackbar: (message, transactionId) =>
-    set({
-      undoSnackbar: { open: true, message, transactionId },
+  openManageCardsDialog: () => set({ manageCardsDialog: { open: true } }),
+  closeManageCardsDialog: () => set({ manageCardsDialog: { open: false } }),
+
+  // Add Contact / Party dialog state (#17)
+  addPartyDialog: {
+    open: false,
+    onCreated: null,
+  },
+  openAddPartyDialog: (onCreated = null) =>
+    set({ addPartyDialog: { open: true, onCreated } }),
+  closeAddPartyDialog: () =>
+    set({ addPartyDialog: { open: false, onCreated: null } }),
+
+  // In-house Toast Queue (#14 & #20) replacing native alert()
+  toasts: [],
+  enqueueToast: (message, options = {}) =>
+    set((state) => {
+      const id = nextToastId++;
+      const newToast = {
+        id,
+        message,
+        severity: options.severity || "success", // success, info, warning, error
+        duration: options.duration ?? (options.undoTransactionId ? 5000 : 4000),
+        undoTransactionId: options.undoTransactionId || null,
+      };
+      // Keep max 4 stacked toasts visible
+      return { toasts: [...state.toasts.slice(-3), newToast] };
     }),
-  closeUndoSnackbar: () =>
+  dismissToast: (id) =>
     set((state) => ({
-      undoSnackbar: { ...state.undoSnackbar, open: false },
+      toasts: state.toasts.filter((t) => t.id !== id),
+    })),
+
+  // Legacy helper mapped directly to Toast Queue so existing callers get stacked undo toasts
+  showUndoSnackbar: (message, transactionId) =>
+    set((state) => {
+      const id = nextToastId++;
+      const newToast = {
+        id,
+        message,
+        severity: "success",
+        duration: 5000,
+        undoTransactionId: transactionId || null,
+      };
+      return { toasts: [...state.toasts.slice(-3), newToast] };
+    }),
+
+  // Global MUI Confirm Dialog (#14) replacing native confirm()
+  confirmDialog: {
+    open: false,
+    title: "Confirm Action",
+    message: "",
+    confirmLabel: "Confirm",
+    confirmColor: "primary",
+    onConfirm: null,
+  },
+  openConfirmDialog: ({
+    title = "Confirm Action",
+    message = "",
+    confirmLabel = "Confirm",
+    confirmColor = "primary",
+    onConfirm = null,
+  }) =>
+    set({
+      confirmDialog: {
+        open: true,
+        title,
+        message,
+        confirmLabel,
+        confirmColor,
+        onConfirm,
+      },
+    }),
+  closeConfirmDialog: () =>
+    set((state) => ({
+      confirmDialog: { ...state.confirmDialog, open: false, onConfirm: null },
     })),
 }));
-

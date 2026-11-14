@@ -18,7 +18,7 @@ import ShoppingBagOutlinedIcon from "@mui/icons-material/ShoppingBagOutlined";
 import LocalCafeOutlinedIcon from "@mui/icons-material/LocalCafeOutlined";
 import VolunteerActivismOutlinedIcon from "@mui/icons-material/VolunteerActivismOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { formatRupiah } from "@/lib/money";
+import MoneyValue from "@/components/MoneyValue";
 import { useLedgerStore } from "@/store/useLedgerStore";
 
 export default function LayerConsumptionOverview({ currentMonth }) {
@@ -79,7 +79,7 @@ export default function LayerConsumptionOverview({ currentMonth }) {
           </IconButton>
         </Stack>
         <Typography variant="body2" sx={{ fontWeight: 700, color: "#2563EB" }}>
-          Total: {formatRupiah(totalConsume)}
+          Total: <MoneyValue value={totalConsume} allowTapToggle />
         </Typography>
       </Box>
 
@@ -91,7 +91,7 @@ export default function LayerConsumptionOverview({ currentMonth }) {
               MONTHLY BUDGET PACING
             </Typography>
             <Typography variant="caption" sx={{ fontWeight: 700, color: pacingPercent > 80 ? "#DC2626" : "#2563EB" }}>
-              {pacingPercent}% of Income ({formatRupiah(totalIncome)})
+              {pacingPercent}% of Income (<MoneyValue value={totalIncome} />)
             </Typography>
           </Box>
           <LinearProgress
@@ -126,7 +126,7 @@ export default function LayerConsumptionOverview({ currentMonth }) {
                   </Typography>
                 </Stack>
                 <Typography variant="h6" sx={{ fontWeight: 800, color: "#0F172A", mb: 0.3 }}>
-                  {formatRupiah(layer.amount)}
+                  <MoneyValue value={layer.amount} allowTapToggle />
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.7rem" }}>
                   {layer.desc}
@@ -136,22 +136,22 @@ export default function LayerConsumptionOverview({ currentMonth }) {
           </Grid>
         ))}
 
-        {/* Cash Shortage Warning Card if detected */}
+        {/* Cash Shortage Amber Warning Card (#13) */}
         {Number(currentMonth.cashShortageLost) > 0 && (
           <Grid item xs={12}>
-            <Card sx={{ borderLeft: "4px solid #DC2626", bgcolor: "#FEF2F2" }}>
+            <Card sx={{ borderLeft: "4px solid #D97706", bgcolor: "#FFFBEB" }}>
               <CardActionArea
                 onClick={() => openChartDrawer("LAYER", "RECONCILIATION_LOST", "Unaccounted Cash Shortage")}
                 sx={{ p: 2 }}
               >
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <WarningAmberIcon sx={{ color: "#DC2626" }} />
+                  <WarningAmberIcon sx={{ color: "#D97706" }} />
                   <Box>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#991B1B" }}>
-                      Unaccounted Cash Shortage (Uang Hilang / Belum Tercatat): {formatRupiah(currentMonth.cashShortageLost)}
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#92400E" }}>
+                      Unaccounted Cash Shortage (Uang Hilang / Belum Tercatat): <MoneyValue value={currentMonth.cashShortageLost} allowTapToggle />
                     </Typography>
-                    <Typography variant="caption" sx={{ color: "#B91C1C" }}>
-                      Click to resolve with backdated transactions without throwing off your ending balance.
+                    <Typography variant="caption" sx={{ color: "#B45309" }}>
+                      Click to review or resolve with backdated transactions without throwing off your ending balance.
                     </Typography>
                   </Box>
                 </Stack>

@@ -1,9 +1,10 @@
-// API Route: POST /api/reconcile
-// Handles physical vault audit, coin denominations, sub-wallet counting (D1/D2), and auto-reconciliation transactions
+// API Route: GET & POST /api/reconcile
+// Handles physical vault audit, coin denominations, sub-wallet counting (D1/D2), and auto-reconciliation
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { toDecimal, addMoney, subMoney, roundMoney } from "@/lib/money";
+import { toDecimal, subMoney, roundMoney } from "@/lib/money";
+import { recalculateLedgerRunningBalances } from "@/lib/ledgerService";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,8 @@ export async function POST(request) {
       checkpointType = "AUDIT_SYNC", // INITIAL_FUND, AUDIT_SYNC
       periodLabel = null,
       actualCountedAmount,
-      denominations = [], // Array of { itemType, label, unitValue, quantity }
-      subContainers = [], // Array of { code, name, balance }
-      autoShiftCoinChange = false, // If true, matches cash shortage with coin surplus
+      denominations = [],
+      subContainers = [],
       notes = null,
     } = body;
 
@@ -75,7 +75,6 @@ export async function POST(request) {
         }
       }
 
-      // Update Sub-containers (D1, D2) if provided
       if (subContainers && subContainers.length > 0) {
         for (const sc of subContainers) {
           await tx.vaultSubContainer.upsert({
@@ -93,7 +92,6 @@ export async function POST(request) {
 
       // 3. Auto-Reconciliation Transaction if there is a discrepancy
       if (discrepancyDec.lessThan(0)) {
-        // Cash shortage / lost
         const lostCategory = await tx.category.findUnique({ where: { code: "EXP_CASH_LOST" } });
         const absDiff = discrepancyDec.abs();
 
@@ -102,7 +100,7 @@ export async function POST(request) {
             transactionDate: now,
             transactionTime: timeStr,
             monthTag,
-            title: `Selisih Kurang (Uang Hilang / Belum Tercatat) - ${vault.name}`,
+            title: `Selisih Kurang (Belum Tercatat) - ${vault.name}`,
             nature: "RECONCILIATION_LOST",
             categoryId: lostCategory ? lostCategory.id : null,
             commitmentType: "NONE",
@@ -110,7 +108,7 @@ export async function POST(request) {
             partyId: selfParty.id,
             linkedCheckpointId: checkpoint.id,
             grossAmount: absDiff,
-            consumeAmount: toDecimal(0), // Rule 15: Not direct personal consumption unless user converts it
+            consumeAmount: toDecimal(0),
             incomeAmount: toDecimal(0),
             notes: `Auto-recorded during checkpoint #${checkpoint.id}`,
           },
@@ -125,11 +123,10 @@ export async function POST(request) {
             creditOut: absDiff,
             netMutation: absDiff.negated(),
             runningVaultBalance: countedDec,
-            runningTotalWealth: countedDec,
+            runningTotalWealth: countedDec, // Recomputed accurately below
           },
         });
       } else if (discrepancyDec.greaterThan(0)) {
-        // Surplus / Bank interest / unaccounted found cash
         const surplusCategory = await tx.category.findUnique({ where: { code: "INC_RECON_SURPLUS" } });
 
         const reconTx = await tx.transaction.create({
@@ -160,16 +157,18 @@ export async function POST(request) {
             creditOut: toDecimal(0),
             netMutation: discrepancyDec,
             runningVaultBalance: countedDec,
-            runningTotalWealth: countedDec,
+            runningTotalWealth: countedDec, // Recomputed accurately below
           },
         });
       }
 
-      // 4. Update Vault's live balance to the counted balance
+      // 4. Update Vault's live balance and recalculate aggregate total wealth snapshots
       await tx.vault.update({
         where: { id: vault.id },
         data: { currentBalance: countedDec },
       });
+
+      await recalculateLedgerRunningBalances(tx);
 
       return checkpoint;
     });
@@ -221,4 +220,3 @@ export async function GET() {
     );
   }
 }
-

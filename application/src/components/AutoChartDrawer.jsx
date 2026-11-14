@@ -16,10 +16,11 @@ import { LineChart } from "@mui/x-charts/LineChart";
 import { PieChart } from "@mui/x-charts/PieChart";
 import { useQuery } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
-import { formatRupiah } from "@/lib/money";
+import { formatShortAxis, formatMoneyDisplay } from "@/lib/money";
+import MoneyValue from "@/components/MoneyValue";
 
 export default function AutoChartDrawer() {
-  const { chartDrawer, closeChartDrawer } = useLedgerStore();
+  const { chartDrawer, closeChartDrawer, isPrivacyHidden } = useLedgerStore();
   const { open, type, id, title, subtitle } = chartDrawer;
 
   const { data, isLoading, error } = useQuery({
@@ -33,6 +34,9 @@ export default function AutoChartDrawer() {
     },
     enabled: open && Boolean(type) && Boolean(id),
   });
+
+  const moneyValueFormatter = (val) =>
+    formatMoneyDisplay(val, { compact: false, hidden: isPrivacyHidden });
 
   return (
     <Drawer
@@ -80,7 +84,7 @@ export default function AutoChartDrawer() {
         </Typography>
       ) : !data ? null : (
         <Box sx={{ pb: 3 }}>
-          {/* 1. Action Card Analytics */}
+          {/* 1. Action Card History */}
           {type === "CARD" && (
             <Stack spacing={3}>
               <Box>
@@ -88,10 +92,17 @@ export default function AutoChartDrawer() {
                   Spending History (Total Uses: {data.totalUses || 0})
                 </Typography>
                 {data.timeSeries && data.timeSeries.length > 0 ? (
-                  <Box sx={{ width: "100%", height: 260 }}>
+                  <Box sx={{ width: "100%", minWidth: 0, height: 260 }}>
                     <BarChart
                       xAxis={[{ scaleType: "band", data: data.timeSeries.map((t) => t.date) }]}
-                      series={[{ data: data.timeSeries.map((t) => t.amount), color: "#2563EB" }]}
+                      yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                      series={[
+                        {
+                          data: data.timeSeries.map((t) => t.amount),
+                          color: "#2563EB",
+                          valueFormatter: moneyValueFormatter,
+                        },
+                      ]}
                       height={250}
                     />
                   </Box>
@@ -107,7 +118,7 @@ export default function AutoChartDrawer() {
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
                     Time-of-Day Routine Heatmap (24 Hours)
                   </Typography>
-                  <Box sx={{ width: "100%", height: 200 }}>
+                  <Box sx={{ width: "100%", minWidth: 0, height: 200 }}>
                     <BarChart
                       xAxis={[{ scaleType: "band", data: data.hourlyData.map((h) => h.hour) }]}
                       series={[{ data: data.hourlyData.map((h) => h.count), color: "#F59E0B" }]}
@@ -123,13 +134,20 @@ export default function AutoChartDrawer() {
           {type === "VAULT" && (
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                Running Balance Timeline (Current: {formatRupiah(data.currentBalance)})
+                Running Balance Timeline (Current: <MoneyValue value={data.currentBalance} includeCents allowTapToggle />)
               </Typography>
               {data.balanceTimeline && data.balanceTimeline.length > 0 ? (
-                <Box sx={{ width: "100%", height: 280 }}>
+                <Box sx={{ width: "100%", minWidth: 0, height: 280 }}>
                   <LineChart
                     xAxis={[{ scaleType: "point", data: data.balanceTimeline.map((b) => b.date) }]}
-                    series={[{ data: data.balanceTimeline.map((b) => b.runningBalance), color: "#10B981" }]}
+                    yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                    series={[
+                      {
+                        data: data.balanceTimeline.map((b) => b.runningBalance),
+                        color: "#10B981",
+                        valueFormatter: moneyValueFormatter,
+                      },
+                    ]}
                     height={270}
                   />
                 </Box>
@@ -157,6 +175,7 @@ export default function AutoChartDrawer() {
                           innerRadius: 30,
                           paddingAngle: 2,
                           cornerRadius: 4,
+                          valueFormatter: (item) => moneyValueFormatter(item.value),
                         },
                       ]}
                       width={260}
@@ -171,10 +190,17 @@ export default function AutoChartDrawer() {
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
                     Expenditure Timeline
                   </Typography>
-                  <Box sx={{ width: "100%", height: 240 }}>
+                  <Box sx={{ width: "100%", minWidth: 0, height: 240 }}>
                     <BarChart
                       xAxis={[{ scaleType: "band", data: data.timeSeries.map((t) => t.date) }]}
-                      series={[{ data: data.timeSeries.map((t) => t.amount), color: "#F97316" }]}
+                      yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                      series={[
+                        {
+                          data: data.timeSeries.map((t) => t.amount),
+                          color: "#F97316",
+                          valueFormatter: moneyValueFormatter,
+                        },
+                      ]}
                       height={230}
                     />
                   </Box>
@@ -187,7 +213,7 @@ export default function AutoChartDrawer() {
           {type === "PARTY" && (
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                Net Balance: {formatRupiah(data.netReceivableBalance)}
+                Net Balance: <MoneyValue value={data.netReceivableBalance} allowTapToggle />
               </Typography>
               {data.debtHistory && data.debtHistory.length > 0 ? (
                 <Stack spacing={1}>
@@ -198,6 +224,7 @@ export default function AutoChartDrawer() {
                         p: 1.5,
                         borderRadius: 1.5,
                         bgcolor: "#F8FAFC",
+                        border: "1px solid #E2E8F0",
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
@@ -215,7 +242,7 @@ export default function AutoChartDrawer() {
                         variant="body2"
                         sx={{ fontWeight: 800, color: item.direction === "INCREASE" ? "#2563EB" : "#10B981" }}
                       >
-                        {formatRupiah(item.amount)}
+                        <MoneyValue value={item.amount} allowTapToggle />
                       </Typography>
                     </Box>
                   ))}
@@ -232,4 +259,3 @@ export default function AutoChartDrawer() {
     </Drawer>
   );
 }
-

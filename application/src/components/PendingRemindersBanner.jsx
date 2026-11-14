@@ -18,7 +18,8 @@ import {
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import AddIcon from "@mui/icons-material/Add";
 import CheckIcon from "@mui/icons-material/Check";
-import { formatRupiah } from "@/lib/money";
+import MoneyValue from "@/components/MoneyValue";
+import CurrencyTextField from "@/components/CurrencyTextField";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
 
@@ -91,7 +92,7 @@ export default function PendingRemindersBanner({ reminders = [] }) {
                   </Typography>
                   {r.estimatedAmount && (
                     <Typography variant="caption" sx={{ color: "#B45309" }}>
-                      Estimated: {formatRupiah(r.estimatedAmount)}
+                      Estimated: <MoneyValue value={r.estimatedAmount} />
                     </Typography>
                   )}
                 </Box>
@@ -130,13 +131,10 @@ export default function PendingRemindersBanner({ reminders = [] }) {
               onChange={(e) => setTitle(e.target.value)}
               required
             />
-            <TextField
+            <CurrencyTextField
               label="Estimated Amount (Optional)"
-              type="number"
-              fullWidth
-              size="small"
               value={estAmount}
-              onChange={(e) => setEstAmount(e.target.value)}
+              onValueChange={(num) => setEstAmount(num)}
             />
           </Stack>
         </DialogContent>

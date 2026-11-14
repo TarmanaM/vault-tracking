@@ -3,7 +3,7 @@
 import React from "react";
 import { Box, Typography, Card, CardActionArea, Stack, Chip } from "@mui/material";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
-import { formatRupiah } from "@/lib/money";
+import MoneyValue from "@/components/MoneyValue";
 import { useLedgerStore } from "@/store/useLedgerStore";
 
 export default function VaultRibbon({ vaults = [] }) {
@@ -56,7 +56,7 @@ export default function VaultRibbon({ vaults = [] }) {
                     fontSize: "0.95rem",
                   }}
                 >
-                  {formatRupiah(vault.currentBalance)}
+                  <MoneyValue value={vault.currentBalance} includeCents allowTapToggle />
                 </Typography>
 
                 {/* Sub-container pills if available (e.g. D1, D2 for Cash) */}
@@ -65,7 +65,11 @@ export default function VaultRibbon({ vaults = [] }) {
                     {vault.subContainers.map((sc) => (
                       <Chip
                         key={sc.id}
-                        label={`${sc.code}: ${formatRupiah(sc.lastCountedBalance)}`}
+                        label={
+                          <>
+                            {sc.code}: <MoneyValue value={sc.lastCountedBalance} />
+                          </>
+                        }
                         size="small"
                         sx={{ fontSize: "0.65rem", height: 18, bgcolor: "#F1F5F9" }}
                       />

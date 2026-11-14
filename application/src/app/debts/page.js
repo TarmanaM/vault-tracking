@@ -9,28 +9,51 @@ import {
   Card,
   CardContent,
   Button,
-  Stack,
   Chip,
+  Stack,
+  CircularProgress,
+  Alert,
+  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  CircularProgress,
-  Divider,
+  TextField,
+  IconButton,
+  Popover,
 } from "@mui/material";
+import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
+import PersonAddAlt1OutlinedIcon from "@mui/icons-material/PersonAddAlt1Outlined";
+import AddIcon from "@mui/icons-material/Add";
 import VolunteerActivismIcon from "@mui/icons-material/VolunteerActivism";
-import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { formatRupiah } from "@/lib/money";
 import { useLedgerStore } from "@/store/useLedgerStore";
+import MoneyValue from "@/components/MoneyValue";
+import CurrencyTextField from "@/components/CurrencyTextField";
 
 export default function DebtsPage() {
   const queryClient = useQueryClient();
-  const openTransactionDialog = useLedgerStore((s) => s.openTransactionDialog);
+  const {
+    openTransactionDialog,
+    openAddPartyDialog,
+    enqueueToast,
+  } = useLedgerStore();
 
-  const [writeOffModal, setWriteOffModal] = useState({ open: false, debtEntry: null, partyName: "" });
+  const [infoAnchor, setInfoAnchor] = useState(null);
+  const [writeOffModal, setWriteOffModal] = useState({
+    open: false,
+    debtEntry: null,
+    partyName: "",
+    maxAmount: 0,
+    amount: "",
+    notes: "",
+  });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["debts"],
     queryFn: async () => {
       const res = await fetch("/api/debts");
@@ -47,18 +70,24 @@ export default function DebtsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const resJson = await res.json();
-      if (!resJson.success) throw new Error(resJson.error);
-      return resJson.data;
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      return json.data;
     },
-    onSuccess: () => {
+    onSuccess: (createdTx) => {
       queryClient.invalidateQueries({ queryKey: ["debts"] });
+      queryClient.invalidateQueries({ queryKey: ["debt-detail"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      setWriteOffModal({ open: false, debtEntry: null, partyName: "" });
-      alert("Receivable forgiven & converted to Charity expense!");
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      setWriteOffModal({ open: false, debtEntry: null, partyName: "", maxAmount: 0, amount: "", notes: "" });
+      enqueueToast("Receivable written off (Ikhlaskan)", {
+        severity: "success",
+        undoTransactionId: createdTx.id,
+      });
     },
     onError: (err) => {
-      alert(`Error writing off debt: ${err.message}`);
+      enqueueToast(`Write-off failed: ${err.message}`, { severity: "error" });
     },
   });
 
@@ -70,208 +99,381 @@ export default function DebtsPage() {
     );
   }
 
-  const { summary, parties = [] } = data || {};
+  if (error || !data) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Alert severity="error">Failed to load Debt Ledger: {error?.message || "Unknown error"}</Alert>
+      </Container>
+    );
+  }
+
+  const summary = data.summary || {};
+  const externalParties = (data.parties || []).filter(
+    (p) => p.code !== "SELF" && p.partyType !== "SELF"
+  );
 
   return (
-    <Container maxWidth="lg" sx={{ py: 2 }}>
-      {/* Title */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A", mb: 0.5 }}>
-          Debt, Loans &amp; PayLater Sub-Ledger
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Track personal loans given to friends/family, repayments, held benefit pools, and debt forgiveness (Write-Off).
-        </Typography>
+    <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 } }}>
+      {/* Header Bar */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.5, mb: 3 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <PeopleAltOutlinedIcon color="primary" />
+          <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A" }}>
+            Debt &amp; PayLater Sub-Ledger
+          </Typography>
+          <IconButton size="small" onClick={(e) => setInfoAnchor(e.currentTarget)}>
+            <InfoOutlinedIcon fontSize="small" />
+          </IconButton>
+        </Stack>
+
+        <Stack direction="row" spacing={1}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<PersonAddAlt1OutlinedIcon />}
+            onClick={() => openAddPartyDialog()}
+            sx={{ fontWeight: 700 }}
+          >
+            + Add Contact
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => openTransactionDialog({ nature: "PAYABLE_BORROW" })}
+            sx={{ fontWeight: 700 }}
+          >
+            Record Debt / Talangan
+          </Button>
+        </Stack>
       </Box>
 
-      {/* Summary KPI Cards */}
-      <Grid container spacing={2} sx={{ mb: 4 }}>
+      {/* Info Popover (Rule 11) */}
+      <Popover
+        open={Boolean(infoAnchor)}
+        anchorEl={infoAnchor}
+        onClose={() => setInfoAnchor(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+      >
+        <Typography variant="caption" sx={{ p: 1.5, display: "block", maxWidth: 320 }}>
+          • <strong>Separate Totals:</strong> Receivables (Piutang) and Payables (Utang) stay cleanly separated without auto-netting.<br />
+          • <strong>Two-Way Offset Merge:</strong> Click Details &amp; Merge on any party with both sides open to manually offset specific items.<br />
+          • <strong>FIFO &amp; Partial Ikhlaskan:</strong> Settle whole balances or forgive partial amounts anytime.
+        </Typography>
+      </Popover>
+
+      {/* 3 Summary KPI Cards */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={4}>
           <Card sx={{ borderLeft: "4px solid #2563EB" }}>
             <CardContent sx={{ p: 2 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                TOTAL RECEIVABLE (PIUTANG TEMAN)
+                TOTAL RECEIVABLES (PIUTANG)
               </Typography>
               <Typography variant="h5" sx={{ fontWeight: 800, color: "#2563EB", mt: 0.5 }}>
-                {formatRupiah(summary?.totalReceivables)}
+                <MoneyValue value={summary.totalReceivables} allowTapToggle />
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Money owed to you by friends/peers
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
         <Grid item xs={12} sm={4}>
-          <Card sx={{ borderLeft: "4px solid #EF4444" }}>
+          <Card sx={{ borderLeft: "4px solid #DC2626" }}>
             <CardContent sx={{ p: 2 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                 TOTAL PAYABLES &amp; PAYLATER (UTANG)
               </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800, color: "#EF4444", mt: 0.5 }}>
-                {formatRupiah(summary?.totalPayables)}
+              <Typography variant="h5" sx={{ fontWeight: 800, color: "#DC2626", mt: 0.5 }}>
+                <MoneyValue value={summary.totalPayables} allowTapToggle />
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                What you owe to contacts &amp; lenders
               </Typography>
             </CardContent>
           </Card>
         </Grid>
 
         <Grid item xs={12} sm={4}>
-          <Card sx={{ borderLeft: "4px solid #8B5CF6" }}>
+          <Card sx={{ borderLeft: "4px solid #7C3AED" }}>
             <CardContent sx={{ p: 2 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                HELD BENEFIT POOL (TASPEN)
+                HELD FUND POOL (TITIPAN / TASPEN)
               </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800, color: "#8B5CF6", mt: 0.5 }}>
-                {formatRupiah(summary?.totalHeldFunds)}
+              <Typography variant="h5" sx={{ fontWeight: 800, color: "#7C3AED", mt: 0.5 }}>
+                <MoneyValue value={summary.totalHeldFunds} allowTapToggle />
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Designated held balances
               </Typography>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      {/* Parties Cards */}
+      {/* Party Cards Grid */}
       <Grid container spacing={2}>
-        {parties
-          .filter((p) => p.partyType !== "SELF")
-          .map((party) => {
-            const netRec = Number(party.netReceivableBalance) || 0;
-            const openEntries = party.debtLedgerEntries?.filter((e) => e.status === "OPEN") || [];
+        {externalParties.map((party) => {
+          const recBal = Number(party.receivableBalance) || 0;
+          const payBal = Number(party.payableBalance) || 0;
+          const canOffset = recBal > 0 && payBal > 0;
+          const maxOffset = Math.min(recBal, payBal);
 
-            return (
-              <Grid item xs={12} sm={6} md={4} key={party.id}>
-                <Card sx={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <CardContent sx={{ p: 2.5 }}>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1.5 }}>
-                      <Box>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+          const openReceivables = (party.debtLedgerEntries || []).filter(
+            (e) =>
+              e.entryCategory === "RECEIVABLE" &&
+              e.direction === "INCREASE" &&
+              Number(e.remainingOpenAmount) > 0
+          );
+
+          const openPayables = (party.debtLedgerEntries || []).filter(
+            (e) =>
+              e.entryCategory === "PAYABLE" &&
+              e.direction === "INCREASE" &&
+              Number(e.remainingOpenAmount) > 0
+          );
+
+          return (
+            <Grid item xs={12} md={6} key={party.id}>
+              <Card sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+                <CardContent sx={{ p: 2.25, flexGrow: 1, display: "flex", flexDirection: "column", gap: 1.5 }}>
+                  {/* Party Title & Detail Link */}
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
+                    <Box>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Typography variant="h6" sx={{ fontWeight: 800 }}>
                           {party.name}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {party.partyType}
-                        </Typography>
-                      </Box>
-                      <Chip
-                        label={netRec > 0 ? "Owes Isa" : netRec < 0 ? "Isa Owes" : "Settled"}
-                        size="small"
-                        color={netRec > 0 ? "primary" : netRec < 0 ? "error" : "default"}
-                        sx={{ fontSize: "0.7rem", height: 20 }}
-                      />
-                    </Box>
-
-                    <Typography variant="h6" sx={{ fontWeight: 800, color: netRec > 0 ? "#2563EB" : netRec < 0 ? "#DC2626" : "#64748B", mb: 1.5 }}>
-                      {formatRupiah(Math.abs(netRec))}
-                    </Typography>
-
-                    {/* Open entries list */}
-                    {openEntries.length > 0 && (
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: "#475569", display: "block", mb: 0.5 }}>
-                          OPEN DEBT ENTRIES:
-                        </Typography>
-                        <Stack spacing={0.8}>
-                          {openEntries.map((e) => (
-                            <Box
-                              key={e.id}
-                              sx={{
-                                p: 1,
-                                bgcolor: "#F8FAFC",
-                                borderRadius: 1.5,
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                              }}
-                            >
-                              <Box>
-                                <Typography variant="caption" sx={{ fontWeight: 700, display: "block" }}>
-                                  {e.transaction?.title || "Pinjaman"}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.65rem" }}>
-                                  Remaining: {formatRupiah(e.remainingOpenAmount)}
-                                </Typography>
-                              </Box>
-
-                              <Button
-                                size="small"
-                                variant="text"
-                                color="warning"
-                                startIcon={<VolunteerActivismIcon sx={{ fontSize: 13 }} />}
-                                onClick={() => setWriteOffModal({ open: true, debtEntry: e, partyName: party.name })}
-                                sx={{ fontSize: "0.65rem", p: 0.5 }}
-                              >
-                                Ikhlaskan
-                              </Button>
-                            </Box>
+                        <Chip label={party.partyType} size="small" sx={{ height: 20, fontSize: "0.65rem" }} />
+                      </Stack>
+                      {party.externalAccounts && party.externalAccounts.length > 0 && (
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                          {party.externalAccounts.map((acc, i) => (
+                            <Chip
+                              key={i}
+                              label={acc}
+                              size="small"
+                              variant="outlined"
+                              sx={{ height: 18, fontSize: "0.65rem", bgcolor: "#F8FAFC" }}
+                            />
                           ))}
                         </Stack>
-                      </Box>
-                    )}
-                  </CardContent>
+                      )}
+                    </Box>
 
-                  <Box sx={{ p: 2, pt: 0 }}>
-                    <Stack direction="row" spacing={1}>
+                    <Button
+                      component={Link}
+                      href={`/debts/${party.id}`}
+                      size="small"
+                      endIcon={<ArrowForwardIcon />}
+                      sx={{ fontWeight: 700, flexShrink: 0 }}
+                    >
+                      Details
+                    </Button>
+                  </Box>
+
+                  {/* Separate Receivable vs Payable Balances (#22-2) */}
+                  <Grid container spacing={1.5}>
+                    <Grid item xs={6}>
+                      <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: "#EFF6FF", border: "1px solid #BFDBFE" }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "#1E40AF", display: "block" }}>
+                          PIUTANG (Owes You)
+                        </Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 800, color: "#2563EB" }}>
+                          <MoneyValue value={recBal} allowTapToggle />
+                        </Typography>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: "#FEF2F2", border: "1px solid #FECACA" }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: "#991B1B", display: "block" }}>
+                          UTANG (You Owe)
+                        </Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 800, color: "#DC2626" }}>
+                          <MoneyValue value={payBal} allowTapToggle />
+                        </Typography>
+                      </Box>
+                    </Grid>
+                  </Grid>
+
+                  {/* Offset Banner when both directions exist */}
+                  {canOffset && (
+                    <Alert
+                      severity="warning"
+                      icon={<CompareArrowsIcon fontSize="small" />}
+                      action={
+                        <Button
+                          component={Link}
+                          href={`/debts/${party.id}`}
+                          color="inherit"
+                          size="small"
+                          sx={{ fontWeight: 800 }}
+                        >
+                          Merge
+                        </Button>
+                      }
+                      sx={{ py: 0.25 }}
+                    >
+                      <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                        Offset available up to <MoneyValue value={maxOffset} />
+                      </Typography>
+                    </Alert>
+                  )}
+
+                  {/* Quick Open Entries Preview */}
+                  {(openReceivables.length > 0 || openPayables.length > 0) && (
+                    <Box sx={{ bgcolor: "#F8FAFC", p: 1.25, borderRadius: 1.5, border: "1px solid #E2E8F0" }}>
+                      <Stack spacing={0.75}>
+                        {openReceivables.slice(0, 2).map((entry) => (
+                          <Box key={entry.id} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}>
+                            <Typography variant="caption" noWrap sx={{ fontWeight: 600, color: "#1E3A8A" }}>
+                              [Piutang] {entry.transaction?.title || `Entry #${entry.id}`}
+                            </Typography>
+                            <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
+                              <Typography variant="caption" sx={{ fontWeight: 800, color: "#2563EB" }}>
+                                <MoneyValue value={entry.remainingOpenAmount} />
+                              </Typography>
+                              <IconButton
+                                size="small"
+                                title="Ikhlaskan / Forgive"
+                                color="success"
+                                onClick={() =>
+                                  setWriteOffModal({
+                                    open: true,
+                                    debtEntry: entry,
+                                    partyName: party.name,
+                                    maxAmount: Number(entry.remainingOpenAmount),
+                                    amount: Number(entry.remainingOpenAmount),
+                                    notes: "",
+                                  })
+                                }
+                              >
+                                <VolunteerActivismIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Stack>
+                          </Box>
+                        ))}
+                        {openPayables.slice(0, 2).map((entry) => (
+                          <Box key={entry.id} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}>
+                            <Typography variant="caption" noWrap sx={{ fontWeight: 600, color: "#991B1B" }}>
+                              [Utang] {entry.transaction?.title || `Entry #${entry.id}`}
+                            </Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 800, color: "#DC2626", flexShrink: 0 }}>
+                              <MoneyValue value={entry.remainingOpenAmount} />
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+
+                  <Divider />
+
+                  {/* Action Buttons */}
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: "auto" }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => openTransactionDialog({ nature: "RECEIVABLE_LEND", partyId: party.id })}
+                      sx={{ fontSize: "0.72rem", fontWeight: 700 }}
+                    >
+                      + Talangi
+                    </Button>
+                    {recBal > 0 && (
                       <Button
-                        fullWidth
-                        size="small"
-                        variant="outlined"
-                        onClick={() =>
-                          openTransactionDialog({
-                            title: `Pinjamkan ke ${party.name}`,
-                            partyId: party.id,
-                          })
-                        }
-                        sx={{ fontSize: "0.75rem" }}
-                      >
-                        + Talangi
-                      </Button>
-                      <Button
-                        fullWidth
                         size="small"
                         variant="contained"
-                        startIcon={<CheckCircleOutlineIcon />}
-                        onClick={() =>
-                          openTransactionDialog({
-                            title: `${party.name} Bayar Utang`,
-                            partyId: party.id,
-                            grossAmount: netRec > 0 ? netRec : 0,
-                          })
-                        }
-                        sx={{ fontSize: "0.75rem", bgcolor: "#059669" }}
+                        color="primary"
+                        onClick={() => openTransactionDialog({ nature: "RECEIVABLE_COLLECT", partyId: party.id })}
+                        sx={{ fontSize: "0.72rem", fontWeight: 700 }}
                       >
-                        Receive Repayment
+                        Receive
                       </Button>
-                    </Stack>
-                  </Box>
-                </Card>
-              </Grid>
-            );
-          })}
+                    )}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      onClick={() => openTransactionDialog({ nature: "PAYABLE_BORROW", partyId: party.id })}
+                      sx={{ fontSize: "0.72rem", fontWeight: 700 }}
+                    >
+                      + I Borrow
+                    </Button>
+                    {payBal > 0 && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="error"
+                        onClick={() => openTransactionDialog({ nature: "PAYABLE_REPAY", partyId: party.id })}
+                        sx={{ fontSize: "0.72rem", fontWeight: 700 }}
+                      >
+                        Pay Debt
+                      </Button>
+                    )}
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
       </Grid>
 
-      {/* Forgive / Write-Off Dialog */}
-      <Dialog open={writeOffModal.open} onClose={() => setWriteOffModal({ open: false, debtEntry: null, partyName: "" })}>
-        <DialogTitle sx={{ fontWeight: 800 }}>Forgive / Write-Off Debt?</DialogTitle>
+      {/* Partial or Full Forgive / Write-Off Dialog (#21) */}
+      <Dialog
+        open={writeOffModal.open}
+        onClose={() => setWriteOffModal({ open: false, debtEntry: null, partyName: "", maxAmount: 0, amount: "", notes: "" })}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Ikhlaskan / Partial Write-Off</DialogTitle>
         <DialogContent dividers>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Are you sure you want to forgive the debt from <strong>{writeOffModal.partyName}</strong> for the amount of{" "}
-            <strong>{formatRupiah(writeOffModal.debtEntry?.remainingOpenAmount || 0)}</strong>?
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            This will close the receivable to Rp 0 and convert it into a <strong>Social &amp; Charity (Sedekah)</strong> expense in your consumption ledger.
-          </Typography>
+          <Stack spacing={2}>
+            <Typography variant="body2">
+              Forgive debt from <strong>{writeOffModal.partyName}</strong> (Remaining:{" "}
+              <strong><MoneyValue value={writeOffModal.maxAmount} /></strong>).
+            </Typography>
+            <CurrencyTextField
+              label="Amount to Ikhlaskan (Full or Partial)"
+              value={writeOffModal.amount}
+              onValueChange={(num) => setWriteOffModal((prev) => ({ ...prev, amount: num }))}
+              required
+              helperText="Reduces receivable without moving vaults and logs under Social & Charity."
+            />
+            <TextField
+              label="Notes (Optional)"
+              size="small"
+              fullWidth
+              value={writeOffModal.notes}
+              onChange={(e) => setWriteOffModal((prev) => ({ ...prev, notes: e.target.value }))}
+            />
+          </Stack>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setWriteOffModal({ open: false, debtEntry: null, partyName: "" })} color="inherit">
+          <Button
+            onClick={() => setWriteOffModal({ open: false, debtEntry: null, partyName: "", maxAmount: 0, amount: "", notes: "" })}
+            color="inherit"
+          >
             Cancel
           </Button>
           <Button
             variant="contained"
             color="success"
             startIcon={<VolunteerActivismIcon />}
-            disabled={writeOffMutation.isPending}
-            onClick={() => writeOffMutation.mutate({ debtEntryId: writeOffModal.debtEntry?.id })}
+            disabled={writeOffMutation.isPending || !writeOffModal.amount || Number(writeOffModal.amount) <= 0}
+            onClick={() =>
+              writeOffMutation.mutate({
+                debtEntryId: writeOffModal.debtEntry?.id,
+                amount: Number(writeOffModal.amount),
+                notes: writeOffModal.notes.trim() || null,
+              })
+            }
           >
-            {writeOffMutation.isPending ? "Forgiving..." : "Yes, Ikhlaskan (Sedekah)"}
+            {writeOffMutation.isPending ? "Forgiving..." : "Confirm Ikhlaskan"}
           </Button>
         </DialogActions>
       </Dialog>
     </Container>
   );
 }
-

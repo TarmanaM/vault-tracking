@@ -284,7 +284,12 @@ async function main() {
 
     // Reset party balances to 0
     await tx.party.updateMany({
-      data: { netReceivableBalance: new Decimal(0), heldFundBalance: new Decimal(0) },
+      data: {
+        netReceivableBalance: new Decimal(0),
+        receivableBalance: new Decimal(0),
+        payableBalance: new Decimal(0),
+        heldFundBalance: new Decimal(0),
+      },
     });
 
     // In-memory running balance trackers
@@ -393,9 +398,35 @@ async function main() {
 
         await tx.party.update({
           where: { id: party.id },
-          data: { netReceivableBalance: { increment: grossDec } },
+          data: {
+            netReceivableBalance: { increment: grossDec },
+            receivableBalance: { increment: grossDec },
+          },
         });
       } else if (nature === "RECEIVABLE_COLLECT") {
+        // Settle oldest open receivable entry for this party (FIFO)
+        const openItem = await tx.debtLedgerEntry.findFirst({
+          where: {
+            partyId: party.id,
+            entryCategory: "RECEIVABLE",
+            direction: "INCREASE",
+            remainingOpenAmount: { gt: 0 },
+          },
+          orderBy: { id: "asc" },
+        });
+
+        if (openItem) {
+          const prevOpen = new Decimal(openItem.remainingOpenAmount);
+          const nextOpen = prevOpen.greaterThan(grossDec) ? prevOpen.minus(grossDec) : new Decimal(0);
+          await tx.debtLedgerEntry.update({
+            where: { id: openItem.id },
+            data: {
+              remainingOpenAmount: nextOpen,
+              status: nextOpen.isZero() ? "SETTLED" : "PARTIAL",
+            },
+          });
+        }
+
         await tx.debtLedgerEntry.create({
           data: {
             transactionId: createdTx.id,
@@ -404,6 +435,7 @@ async function main() {
             direction: "DECREASE",
             settlementMethod: "CASH_OR_BANK",
             amount: grossDec,
+            referenceDebtId: openItem ? openItem.id : null,
             remainingOpenAmount: new Decimal(0),
             status: "SETTLED",
           },
@@ -411,7 +443,10 @@ async function main() {
 
         await tx.party.update({
           where: { id: party.id },
-          data: { netReceivableBalance: { decrement: grossDec } },
+          data: {
+            netReceivableBalance: { decrement: grossDec },
+            receivableBalance: { decrement: grossDec },
+          },
         });
       }
 

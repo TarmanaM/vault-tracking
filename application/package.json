@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "next build",
     "dev-pubs": "ipconfig | findstr /i \"ipv4\" & next dev --hostname 0.0.0.0 --port 3000 --turbopack",
     "prod-pubs": "ipconfig | findstr /i \"ipv4\" & next build && next start --hostname 0.0.0.0 --port 3000",
     "start": "next start",

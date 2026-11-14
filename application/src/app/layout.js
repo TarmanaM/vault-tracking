@@ -5,12 +5,13 @@ import AppLayout from "@/components/Navigation/AppLayout";
 export const metadata = {
   title: "Vault Tracking",
   description: "In-House Personal Finance & Accounting Ledger System",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
-  },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({ children }) {

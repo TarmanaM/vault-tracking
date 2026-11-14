@@ -1,5 +1,5 @@
 // API Route: GET /api/debts
-// Returns active receivables, payables, held funds, and open settlement chains
+// Returns separate receivables (Piutang), payables (Utang), held funds, and open entries per party (#22-2)
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
@@ -13,31 +13,58 @@ export async function GET() {
       where: { isActive: true },
       include: {
         debtLedgerEntries: {
-          include: { transaction: true },
+          include: {
+            transaction: {
+              include: { category: true, legs: { include: { vault: true } } },
+            },
+          },
           orderBy: { id: "desc" },
         },
       },
-      orderBy: { netReceivableBalance: "desc" },
+      orderBy: [{ receivableBalance: "desc" }, { payableBalance: "desc" }, { name: "asc" }],
+    });
+
+    // Also include LIABILITY_CREDIT_LINE vaults (e.g. SPayLater) in payables overview
+    const liabilityVaults = await prisma.vault.findMany({
+      where: { isActive: true, vaultType: "LIABILITY_CREDIT_LINE" },
     });
 
     let totalReceivables = toDecimal(0);
     let totalPayables = toDecimal(0);
     let totalHeldFunds = toDecimal(0);
 
-    for (const p of parties) {
-      const rec = toDecimal(p.netReceivableBalance);
+    for (const v of liabilityVaults) {
+      const bal = toDecimal(v.currentBalance);
+      if (bal.lessThan(0)) {
+        totalPayables = addMoney(totalPayables, bal.abs());
+      }
+    }
+
+    const enrichedParties = parties.map((p) => {
+      const rec = toDecimal(p.receivableBalance);
+      const pay = toDecimal(p.payableBalance);
       const held = toDecimal(p.heldFundBalance);
 
-      if (rec.greaterThan(0)) {
-        totalReceivables = addMoney(totalReceivables, rec);
-      } else if (rec.lessThan(0)) {
-        totalPayables = addMoney(totalPayables, rec.abs());
-      }
-
+      totalReceivables = addMoney(totalReceivables, rec);
+      totalPayables = addMoney(totalPayables, pay);
       if (held.greaterThan(0)) {
         totalHeldFunds = addMoney(totalHeldFunds, held);
       }
-    }
+
+      let externalAccounts = [];
+      try {
+        externalAccounts = p.externalAccountsJson ? JSON.parse(p.externalAccountsJson) : [];
+      } catch {
+        externalAccounts = [];
+      }
+
+      return {
+        ...p,
+        receivableBalance: roundMoney(rec),
+        payableBalance: roundMoney(pay),
+        externalAccounts,
+      };
+    });
 
     return NextResponse.json({
       success: true,
@@ -47,7 +74,7 @@ export async function GET() {
           totalPayables: roundMoney(totalPayables),
           totalHeldFunds: roundMoney(totalHeldFunds),
         },
-        parties,
+        parties: enrichedParties,
       },
     });
   } catch (error) {
@@ -58,4 +85,3 @@ export async function GET() {
     );
   }
 }
-

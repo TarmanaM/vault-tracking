@@ -1,5 +1,5 @@
 // API Route: POST /api/debt/write-off
-// Handles debt forgiveness / write-off conversion to charity or emergency expense
+// Handles full or manual partial debt forgiveness / write-off conversion to charity or expense
 
 import { NextResponse } from "next/server";
 import { writeOffDebt } from "@/lib/ledgerService";
@@ -9,13 +9,28 @@ export const dynamic = "force-dynamic";
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { debtEntryId, destinationCategoryCode = "EXP_SOCIAL_CHARITY" } = body;
+    const {
+      debtEntryId = null,
+      partyId = null,
+      amount = null,
+      destinationCategoryCode = "EXP_SOCIAL_CHARITY",
+      notes = null,
+    } = body;
 
-    if (!debtEntryId) {
-      return NextResponse.json({ success: false, error: "debtEntryId is required" }, { status: 400 });
+    if (!debtEntryId && !partyId) {
+      return NextResponse.json(
+        { success: false, error: "Either debtEntryId or partyId is required" },
+        { status: 400 }
+      );
     }
 
-    const result = await writeOffDebt(parseInt(debtEntryId, 10), destinationCategoryCode);
+    const result = await writeOffDebt({
+      debtEntryId,
+      partyId,
+      amount,
+      destinationCategoryCode,
+      notes,
+    });
 
     return NextResponse.json({
       success: true,
@@ -29,4 +44,3 @@ export async function POST(request) {
     );
   }
 }
-

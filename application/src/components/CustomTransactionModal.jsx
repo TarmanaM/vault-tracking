@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -10,259 +10,627 @@ import {
   TextField,
   MenuItem,
   Stack,
-  FormControlLabel,
-  Checkbox,
-  Box,
   Typography,
+  Alert,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
+  FormLabel,
+  FormControl,
+  Autocomplete,
+  IconButton,
+  Popover,
+  Box,
+  Grid,
 } from "@mui/material";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import PersonAddAlt1OutlinedIcon from "@mui/icons-material/PersonAddAlt1Outlined";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import CurrencyTextField from "@/components/CurrencyTextField";
+import MoneyValue from "@/components/MoneyValue";
 
-export default function CustomTransactionModal({ vaults = [], parties = [], categories = [] }) {
-  const { transactionDialog, closeTransactionDialog, showUndoSnackbar } = useLedgerStore();
+const NATURE_OPTIONS = [
+  { value: "EXPENSE", label: "Expense (Pengeluaran)" },
+  { value: "INCOME", label: "Income / Top Up (Pemasukan)" },
+  { value: "TRANSFER", label: "Transfer (Move Between Vaults)" },
+  { value: "RECEIVABLE_LEND", label: "Lend / Talangi Teman (Piutang)" },
+  { value: "RECEIVABLE_COLLECT", label: "Receive Debt Payment (Terima Piutang)" },
+  { value: "PAYABLE_BORROW", label: "I Borrow / Ditalangi (Utang Saya)" },
+  { value: "PAYABLE_REPAY", label: "Pay My Debt / PayLater (Bayar Utang)" },
+];
+
+function getLocalNowParts() {
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return { dateStr, timeStr };
+}
+
+export default function CustomTransactionModal({
+  vaults = [],
+  categories = [],
+  parties = [],
+  latestCheckpointsByVault = {},
+}) {
+  const {
+    transactionDialog,
+    closeTransactionDialog,
+    openAddPartyDialog,
+    enqueueToast,
+  } = useLedgerStore();
   const queryClient = useQueryClient();
 
   const [title, setTitle] = useState("");
   const [nature, setNature] = useState("EXPENSE");
-  const [grossAmount, setGrossAmount] = useState("");
+  const [payableMode, setPayableMode] = useState("EXPENSE_TALANG");
   const [sourceVaultId, setSourceVaultId] = useState("");
   const [targetVaultId, setTargetVaultId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [partyId, setPartyId] = useState("");
+  const [grossAmount, setGrossAmount] = useState("");
   const [taxFeeAmount, setTaxFeeAmount] = useState("");
-  const [isBackdated, setIsBackdated] = useState(false);
+  const [coinChangeAmount, setCoinChangeAmount] = useState("");
+  const [transactionDate, setTransactionDate] = useState(() => getLocalNowParts().dateStr);
+  const [transactionTime, setTransactionTime] = useState(() => getLocalNowParts().timeStr);
+  const [referenceDebtId, setReferenceDebtId] = useState("");
+  const [counterpartyAccountNote, setCounterpartyAccountNote] = useState("");
   const [notes, setNotes] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [infoAnchor, setInfoAnchor] = useState(null);
 
-  const preset = transactionDialog.presetCard;
+  const selfParty = useMemo(
+    () => parties.find((p) => p.code === "SELF" || p.partyType === "SELF"),
+    [parties]
+  );
 
+  // Sync preset values whenever the dialog opens
   useEffect(() => {
+    if (!transactionDialog.open) return;
+
+    const preset = transactionDialog.presetCard;
+    const { dateStr, timeStr } = getLocalNowParts();
+
     if (preset) {
       setTitle(preset.title || "");
-      setGrossAmount(preset.grossAmount ? String(preset.grossAmount) : "");
-      if (preset.sourceVaultId) setSourceVaultId(String(preset.sourceVaultId));
-      if (preset.partyId) setPartyId(String(preset.partyId));
-      if (preset.categoryId) setCategoryId(String(preset.categoryId));
+      setNature(preset.nature || "EXPENSE");
+      setPayableMode(preset.payableMode || "EXPENSE_TALANG");
+      setSourceVaultId(preset.sourceVaultId ? String(preset.sourceVaultId) : vaults[0]?.id ? String(vaults[0].id) : "");
+      setTargetVaultId(preset.targetVaultId ? String(preset.targetVaultId) : "");
+      setCategoryId(preset.categoryId ? String(preset.categoryId) : "");
+      setPartyId(
+        preset.partyId
+          ? String(preset.partyId)
+          : selfParty?.id
+          ? String(selfParty.id)
+          : ""
+      );
+      setGrossAmount(preset.grossAmount ? Number(preset.grossAmount) : "");
+      setTaxFeeAmount(preset.taxFeeAmount ? Number(preset.taxFeeAmount) : "");
+      setCoinChangeAmount(preset.coinChangeAmount ? Number(preset.coinChangeAmount) : "");
+      setReferenceDebtId(preset.referenceDebtId ? String(preset.referenceDebtId) : "");
+      setCounterpartyAccountNote(preset.counterpartyAccountNote || "");
+      setNotes(preset.notes || "");
+      setTransactionDate(preset.transactionDate || dateStr);
+      setTransactionTime(preset.transactionTime || timeStr);
     } else {
-      if (vaults.length > 0 && !sourceVaultId) setSourceVaultId(String(vaults[0].id));
-      if (parties.length > 0 && !partyId) {
-        const selfParty = parties.find((p) => p.partyType === "SELF") || parties[0];
-        setPartyId(String(selfParty.id));
-      }
-      if (categories.length > 0 && !categoryId) setCategoryId(String(categories[0].id));
+      setTitle("");
+      setNature("EXPENSE");
+      setPayableMode("EXPENSE_TALANG");
+      setSourceVaultId(vaults[0]?.id ? String(vaults[0].id) : "");
+      setTargetVaultId(vaults[1]?.id ? String(vaults[1].id) : "");
+      setCategoryId("");
+      setPartyId(selfParty?.id ? String(selfParty.id) : "");
+      setGrossAmount("");
+      setTaxFeeAmount("");
+      setCoinChangeAmount("");
+      setReferenceDebtId("");
+      setCounterpartyAccountNote("");
+      setNotes("");
+      setTransactionDate(dateStr);
+      setTransactionTime(timeStr);
     }
-  }, [preset, vaults, parties, categories, sourceVaultId, partyId, categoryId]);
+    setErrorMsg("");
+  }, [transactionDialog.open, transactionDialog.presetCard, vaults, selfParty]);
 
-  const createTxMutation = useMutation({
+  const isDebtNature =
+    nature === "RECEIVABLE_LEND" ||
+    nature === "RECEIVABLE_COLLECT" ||
+    nature === "PAYABLE_BORROW" ||
+    nature === "PAYABLE_REPAY";
+
+  const isSettlementNature =
+    nature === "RECEIVABLE_COLLECT" || nature === "PAYABLE_REPAY";
+
+  const needsVaultSelection =
+    nature !== "PAYABLE_BORROW" || payableMode === "CASH_LOAN";
+
+  const selectedPartyObj = useMemo(
+    () => parties.find((p) => String(p.id) === String(partyId)),
+    [parties, partyId]
+  );
+
+  // Ensure non-SELF party default is picked when switching into debt natures
+  useEffect(() => {
+    if (!transactionDialog.open) return;
+    if (isDebtNature && (!partyId || String(partyId) === String(selfParty?.id))) {
+      const firstExternal = parties.find((p) => p.code !== "SELF" && p.partyType !== "SELF");
+      if (firstExternal) setPartyId(String(firstExternal.id));
+    } else if (!isDebtNature && !partyId && selfParty) {
+      setPartyId(String(selfParty.id));
+    }
+  }, [isDebtNature, partyId, parties, selfParty, transactionDialog.open]);
+
+  // Fetch party's open debt items for specific vs FIFO settlement (#17)
+  const { data: partyDetail } = useQuery({
+    queryKey: ["debt-detail", partyId],
+    queryFn: async () => {
+      const res = await fetch(`/api/debts/${partyId}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+      return json.data;
+    },
+    enabled: Boolean(transactionDialog.open && isSettlementNature && partyId && String(partyId) !== String(selfParty?.id)),
+  });
+
+  const openItemsForSettlement = useMemo(() => {
+    if (!partyDetail) return [];
+    return nature === "RECEIVABLE_COLLECT"
+      ? partyDetail.openReceivables || []
+      : partyDetail.openPayables || [];
+  }, [partyDetail, nature]);
+
+  // #15 Auto-Detect Retroactive against latest checkpoint of the affected vault
+  const retroactiveAlert = useMemo(() => {
+    if (!needsVaultSelection || !sourceVaultId || !transactionDate) return null;
+    const latestCp = latestCheckpointsByVault[sourceVaultId];
+    if (!latestCp || !latestCp.checkpointTimestamp) return null;
+
+    const chosenDt = new Date(`${transactionDate}T${transactionTime || "00:00"}:00`);
+    const cpDt = new Date(latestCp.checkpointTimestamp);
+    if (Number.isNaN(chosenDt.getTime()) || Number.isNaN(cpDt.getTime())) return null;
+
+    if (chosenDt < cpDt) {
+      return {
+        periodLabel: latestCp.periodLabel,
+        checkpointDate: cpDt.toLocaleDateString(),
+      };
+    }
+    return null;
+  }, [needsVaultSelection, sourceVaultId, transactionDate, transactionTime, latestCheckpointsByVault]);
+
+  const submitMutation = useMutation({
     mutationFn: async (payload) => {
       const res = await fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      return data.data;
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Transaction failed");
+      return json.data;
     },
     onSuccess: (createdTx, vars) => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      queryClient.invalidateQueries({ queryKey: ["debts"] });
+      queryClient.invalidateQueries({ queryKey: ["debt-detail"] });
+      queryClient.invalidateQueries({ queryKey: ["checkpoints"] });
+
       closeTransactionDialog();
-      showUndoSnackbar(`Transaction "${vars.title}" saved!`, createdTx.id);
-      // Reset form
-      setTitle("");
-      setGrossAmount("");
-      setTaxFeeAmount("");
-      setNotes("");
-      setIsBackdated(false);
+      enqueueToast(`Recorded "${vars.title}"`, {
+        severity: "success",
+        undoTransactionId: createdTx.id,
+      });
     },
     onError: (err) => {
-      alert(`Error creating transaction: ${err.message}`);
+      setErrorMsg(err.message);
+      enqueueToast(err.message, { severity: "error" });
     },
   });
 
-  const handleSubmit = () => {
-    const selectedCategory = categories.find((c) => c.id === parseInt(categoryId, 10));
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setErrorMsg("");
 
-    createTxMutation.mutate({
-      title,
+    const amt = Number(grossAmount) || 0;
+    if (amt <= 0) {
+      setErrorMsg("Transaction amount must be greater than zero.");
+      return;
+    }
+
+    if (isDebtNature && (!partyId || String(partyId) === String(selfParty?.id))) {
+      setErrorMsg("Please select an external contact/party (or click + Add Contact).");
+      return;
+    }
+
+    const pickedCat = categories.find((c) => String(c.id) === String(categoryId));
+    const finalTitle =
+      title.trim() ||
+      (nature === "PAYABLE_REPAY"
+        ? `Pay Debt - ${selectedPartyObj?.name || "Contact"}`
+        : nature === "RECEIVABLE_COLLECT"
+        ? `Collect Receivable - ${selectedPartyObj?.name || "Contact"}`
+        : nature === "PAYABLE_BORROW"
+        ? `Borrowed from ${selectedPartyObj?.name || "Contact"}`
+        : nature === "RECEIVABLE_LEND"
+        ? `Lent to ${selectedPartyObj?.name || "Contact"}`
+        : "Custom Transaction");
+
+    submitMutation.mutate({
+      title: finalTitle,
       nature,
-      categoryId: categoryId ? parseInt(categoryId, 10) : null,
-      commitmentType: selectedCategory?.commitmentType || "NONE",
-      priorityTier: selectedCategory?.priorityTier || "NONE",
-      partyId: parseInt(partyId, 10),
-      sourceVaultId: parseInt(sourceVaultId, 10),
-      targetVaultId: targetVaultId ? parseInt(targetVaultId, 10) : null,
-      grossAmount: Number(grossAmount) || 0,
+      payableMode: nature === "PAYABLE_BORROW" ? payableMode : undefined,
+      categoryId: pickedCat ? pickedCat.id : null,
+      commitmentType: pickedCat?.commitmentType || "NONE",
+      priorityTier: pickedCat?.priorityTier || "NONE",
+      partyId: partyId ? parseInt(partyId, 10) : selfParty?.id,
+      sourceVaultId: needsVaultSelection && sourceVaultId ? parseInt(sourceVaultId, 10) : null,
+      targetVaultId: nature === "TRANSFER" && targetVaultId ? parseInt(targetVaultId, 10) : null,
+      grossAmount: amt,
       taxFeeAmount: Number(taxFeeAmount) || 0,
-      isBackdated,
-      notes,
+      coinChangeAmount: Number(coinChangeAmount) || 0,
+      transactionDate: `${transactionDate}T${transactionTime || "12:00"}:00`,
+      transactionTime,
+      referenceDebtId: isSettlementNature && referenceDebtId ? parseInt(referenceDebtId, 10) : null,
+      counterpartyAccountNote: isDebtNature && counterpartyAccountNote ? counterpartyAccountNote.trim() : null,
+      notes: notes.trim() || null,
     });
   };
 
+  const partyList = isDebtNature
+    ? parties.filter((p) => p.code !== "SELF" && p.partyType !== "SELF")
+    : parties;
+
+  const savedExternalAccounts = selectedPartyObj?.externalAccounts || [];
+
   return (
     <Dialog open={transactionDialog.open} onClose={closeTransactionDialog} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontWeight: 800 }}>Record Custom Transaction</DialogTitle>
-      <DialogContent dividers>
-        <Stack spacing={2} sx={{ pt: 1 }}>
-          <TextField
-            label="Transaction Title / Description"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            fullWidth
-            size="small"
-            required
-          />
+      <form onSubmit={handleSubmit}>
+        <DialogTitle sx={{ fontWeight: 800, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Record Transaction</span>
+          <IconButton size="small" onClick={(e) => setInfoAnchor(e.currentTarget)}>
+            <InfoOutlinedIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
 
-          <TextField
-            select
-            label="Transaction Nature"
-            value={nature}
-            onChange={(e) => setNature(e.target.value)}
-            fullWidth
-            size="small"
-          >
-            <MenuItem value="EXPENSE">Expense (Pengeluaran Konsumsi)</MenuItem>
-            <MenuItem value="INCOME">Income (Pemasukan Bersih)</MenuItem>
-            <MenuItem value="TRANSFER">Transfer (Pindah Saldo Antar Bank/Cash/Koin)</MenuItem>
-            <MenuItem value="RECEIVABLE_LEND">Lend / Talangi Teman (Piutang)</MenuItem>
-            <MenuItem value="RECEIVABLE_COLLECT">Collect / Teman Bayar Utang (Terima Piutang)</MenuItem>
-          </TextField>
+        <Popover
+          open={Boolean(infoAnchor)}
+          anchorEl={infoAnchor}
+          onClose={() => setInfoAnchor(null)}
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        >
+          <Typography variant="caption" sx={{ p: 1.5, display: "block", maxWidth: 290 }}>
+            • <strong>Auto-Retroactive:</strong> Dates older than your vault&apos;s latest checkpoint automatically absorb into unexplained discrepancies without corrupting your current balance.<br />
+            • <strong>FIFO Totalan:</strong> Leave Specific Debt Item as Auto-Allocate to pay oldest open items first.
+          </Typography>
+        </Popover>
 
-          <TextField
-            label="Gross Amount (Rp)"
-            type="number"
-            value={grossAmount}
-            onChange={(e) => setGrossAmount(e.target.value)}
-            fullWidth
-            size="small"
-            required
-          />
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            {errorMsg && <Alert severity="error">{errorMsg}</Alert>}
 
-          <Stack direction="row" spacing={2}>
             <TextField
               select
-              label={nature === "TRANSFER" ? "From Vault (Sumber)" : "Vault (Penyimpanan)"}
-              value={sourceVaultId}
-              onChange={(e) => setSourceVaultId(e.target.value)}
-              fullWidth
+              label="Transaction Type (Nature)"
               size="small"
+              fullWidth
+              value={nature}
+              onChange={(e) => {
+                setNature(e.target.value);
+                setReferenceDebtId("");
+              }}
             >
-              {vaults.map((v) => (
-                <MenuItem key={v.id} value={String(v.id)}>
-                  {v.name}
+              {NATURE_OPTIONS.map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
                 </MenuItem>
               ))}
             </TextField>
 
-            {nature === "TRANSFER" && (
+            <TextField
+              label="Title / Description"
+              placeholder='e.g. "Beli Makan Siang", "Bayar Utang ke Budi"'
+              size="small"
+              fullWidth
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+
+            {/* PAYABLE_BORROW Mode Selector (#17) */}
+            {nature === "PAYABLE_BORROW" && (
+              <FormControl component="fieldset" sx={{ bgcolor: "#F8FAFC", p: 1.5, borderRadius: 2, border: "1px solid #E2E8F0" }}>
+                <FormLabel component="legend" sx={{ fontSize: "0.75rem", fontWeight: 800, color: "#334155" }}>
+                  Borrowing Mode
+                </FormLabel>
+                <RadioGroup
+                  value={payableMode}
+                  onChange={(e) => setPayableMode(e.target.value)}
+                >
+                  <FormControlLabel
+                    value="EXPENSE_TALANG"
+                    control={<Radio size="small" />}
+                    label={
+                      <Typography variant="caption">
+                        <strong>Ditalangi Teman:</strong> Personal expense right now (counts in consumption), no cash enters my vault.
+                      </Typography>
+                    }
+                  />
+                  <FormControlLabel
+                    value="CASH_LOAN"
+                    control={<Radio size="small" />}
+                    label={
+                      <Typography variant="caption">
+                        <strong>Pinjam Tunai / Cash Loan:</strong> Cash deposits into my Vault now (0 consumption).
+                      </Typography>
+                    }
+                  />
+                </RadioGroup>
+              </FormControl>
+            )}
+
+            {/* Amount + Admin Fee */}
+            <Grid container spacing={1.5}>
+              <Grid item xs={12} sm={nature === "EXPENSE" || nature === "TRANSFER" || nature === "PAYABLE_REPAY" ? 7 : 12}>
+                <CurrencyTextField
+                  label="Gross Amount"
+                  value={grossAmount}
+                  onValueChange={(num) => setGrossAmount(num)}
+                  required
+                  showClear
+                />
+              </Grid>
+              {(nature === "EXPENSE" || nature === "TRANSFER" || nature === "PAYABLE_REPAY") && (
+                <Grid item xs={12} sm={5}>
+                  <CurrencyTextField
+                    label="Admin Fee / Tax (Optional)"
+                    value={taxFeeAmount}
+                    onValueChange={(num) => setTaxFeeAmount(num)}
+                    showClear
+                  />
+                </Grid>
+              )}
+            </Grid>
+
+            {/* Vault Selectors */}
+            {needsVaultSelection && (
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                <TextField
+                  select
+                  label={
+                    nature === "INCOME" || nature === "RECEIVABLE_COLLECT" || (nature === "PAYABLE_BORROW" && payableMode === "CASH_LOAN")
+                      ? "Destination Vault (Money In)"
+                      : "Source Vault (Money Out)"
+                  }
+                  size="small"
+                  fullWidth
+                  required
+                  value={sourceVaultId}
+                  onChange={(e) => setSourceVaultId(e.target.value)}
+                >
+                  {vaults.map((v) => (
+                    <MenuItem key={v.id} value={String(v.id)}>
+                      {v.name} (<MoneyValue value={v.currentBalance} />)
+                    </MenuItem>
+                  ))}
+                </TextField>
+
+                {nature === "TRANSFER" && (
+                  <TextField
+                    select
+                    label="Target Vault"
+                    size="small"
+                    fullWidth
+                    required
+                    value={targetVaultId}
+                    onChange={(e) => setTargetVaultId(e.target.value)}
+                  >
+                    {vaults
+                      .filter((v) => String(v.id) !== String(sourceVaultId))
+                      .map((v) => (
+                        <MenuItem key={v.id} value={String(v.id)}>
+                          {v.name}
+                        </MenuItem>
+                      ))}
+                  </TextField>
+                )}
+              </Stack>
+            )}
+
+            {/* Category Selector for Consumption Natures */}
+            {(nature === "EXPENSE" || (nature === "PAYABLE_BORROW" && payableMode === "EXPENSE_TALANG")) && (
               <TextField
                 select
-                label="To Vault (Tujuan)"
-                value={targetVaultId}
-                onChange={(e) => setTargetVaultId(e.target.value)}
-                fullWidth
+                label="Category & Consumption Layer"
                 size="small"
-                required
+                fullWidth
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
               >
-                {vaults.map((v) => (
-                  <MenuItem key={v.id} value={String(v.id)}>
-                    {v.name}
+                <MenuItem value="">Uncategorized</MenuItem>
+                {categories.map((c) => (
+                  <MenuItem key={c.id} value={String(c.id)}>
+                    {c.name} ({c.commitmentType})
                   </MenuItem>
                 ))}
               </TextField>
             )}
-          </Stack>
 
-          {nature !== "TRANSFER" && (
-            <TextField
-              select
-              label="Functional Category"
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              fullWidth
-              size="small"
-            >
-              {categories.map((c) => (
-                <MenuItem key={c.id} value={String(c.id)}>
-                  {c.name} ({c.commitmentType})
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
+            {/* Party Selector + Quick Add Contact (#17) */}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                select
+                label={isDebtNature ? "Contact / Lender / Borrower" : "Party"}
+                size="small"
+                fullWidth
+                value={partyId}
+                onChange={(e) => {
+                  setPartyId(e.target.value);
+                  setReferenceDebtId("");
+                }}
+              >
+                {partyList.map((p) => (
+                  <MenuItem key={p.id} value={String(p.id)}>
+                    {p.name}
+                    {Number(p.receivableBalance || 0) > 0 ? " (Owes you)" : ""}
+                    {Number(p.payableBalance || 0) > 0 ? " (You owe)" : ""}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<PersonAddAlt1OutlinedIcon />}
+                onClick={() => openAddPartyDialog((created) => setPartyId(String(created.id)))}
+                sx={{ flexShrink: 0, height: 40, fontWeight: 700 }}
+              >
+                + Contact
+              </Button>
+            </Stack>
 
-          <TextField
-            select
-            label="Party / Role (Counterparty)"
-            value={partyId}
-            onChange={(e) => setPartyId(e.target.value)}
-            fullWidth
-            size="small"
-          >
-            {parties.map((p) => (
-              <MenuItem key={p.id} value={String(p.id)}>
-                {p.name} ({p.partyType})
-              </MenuItem>
-            ))}
-          </TextField>
+            {/* Specific Item vs FIFO Allocation + External Counterparty Bank Note (#17) */}
+            {isSettlementNature && (
+              <Stack spacing={1.5} sx={{ bgcolor: "#F8FAFC", p: 1.5, borderRadius: 2, border: "1px solid #E2E8F0" }}>
+                <TextField
+                  select
+                  label="Apply Payment To (Specific vs FIFO Totalan)"
+                  size="small"
+                  fullWidth
+                  value={referenceDebtId}
+                  onChange={(e) => {
+                    const pickedId = e.target.value;
+                    setReferenceDebtId(pickedId);
+                    if (pickedId) {
+                      const found = openItemsForSettlement.find((i) => String(i.id) === String(pickedId));
+                      if (found && !grossAmount) {
+                        setGrossAmount(Number(found.remainingOpenAmount));
+                      }
+                    }
+                  }}
+                >
+                  <MenuItem value="">
+                    Auto-Allocate Oldest First / Totalan FIFO ({openItemsForSettlement.length} open item{openItemsForSettlement.length === 1 ? "" : "s"})
+                  </MenuItem>
+                  {openItemsForSettlement.map((item) => (
+                    <MenuItem key={item.id} value={String(item.id)}>
+                      {item.transaction?.title || `Entry #${item.id}`} — Open:{" "}
+                      <MoneyValue value={item.remainingOpenAmount} />
+                    </MenuItem>
+                  ))}
+                </TextField>
 
-          {nature === "EXPENSE" && (
-            <TextField
-              label="Optional Tax / Admin Fee (+ Rp)"
-              type="number"
-              value={taxFeeAmount}
-              onChange={(e) => setTaxFeeAmount(e.target.value)}
-              fullWidth
-              size="small"
-              helperText="Will auto-split into a separate Admin Fee line in the general ledger."
-            />
-          )}
-
-          <TextField
-            label="Notes / Keterangan"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            fullWidth
-            size="small"
-            multiline
-            rows={2}
-          />
-
-          {/* Backdated transaction absorption check (Prompt requirement) */}
-          <Box sx={{ p: 1.5, bgcolor: "#F8FAFC", borderRadius: 2, border: "1px solid #E2E8F0" }}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={isBackdated}
-                  onChange={(e) => setIsBackdated(e.target.checked)}
+                <Autocomplete
+                  freeSolo
+                  size="small"
+                  options={savedExternalAccounts}
+                  inputValue={counterpartyAccountNote}
+                  onInputChange={(_, val) => setCounterpartyAccountNote(val)}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Their External Bank / E-Wallet Note (Optional)"
+                      placeholder='e.g. "BCA - Budi", "Mandiri"'
+                    />
+                  )}
                 />
-              }
-              label={
-                <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    Retroactive / Baru Ingat Transaksi Masa Lalu
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Otomatis menyerap ke Dana Awal / Uang Hilang agar saldo akhir dompet saat ini tetap 100% sinkron.
-                  </Typography>
-                </Box>
-              }
+              </Stack>
+            )}
+
+            {/* External bank note option for Lend / Borrow too */}
+            {(nature === "RECEIVABLE_LEND" || nature === "PAYABLE_BORROW") && (
+              <Autocomplete
+                freeSolo
+                size="small"
+                options={savedExternalAccounts}
+                inputValue={counterpartyAccountNote}
+                onInputChange={(_, val) => setCounterpartyAccountNote(val)}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Counterparty External Account Note (Optional)"
+                    placeholder='e.g. "Transfer to BCA Budi"'
+                  />
+                )}
+              />
+            )}
+
+            {/* Date + Exact Time + "Now" Button (#10) */}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                label="Date"
+                type="date"
+                size="small"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={transactionDate}
+                onChange={(e) => setTransactionDate(e.target.value)}
+                required
+              />
+              <TextField
+                label="Time"
+                type="time"
+                size="small"
+                sx={{ width: 150, flexShrink: 0 }}
+                InputLabelProps={{ shrink: true }}
+                value={transactionTime}
+                onChange={(e) => setTransactionTime(e.target.value)}
+                required
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<AccessTimeIcon />}
+                onClick={() => {
+                  const { dateStr, timeStr } = getLocalNowParts();
+                  setTransactionDate(dateStr);
+                  setTransactionTime(timeStr);
+                }}
+                sx={{ height: 40, flexShrink: 0, fontWeight: 700 }}
+              >
+                Now
+              </Button>
+            </Stack>
+
+            {/* Auto-Detected Retroactive Alert (#15) */}
+            {retroactiveAlert && (
+              <Alert severity="info" variant="outlined">
+                <strong>Auto-Detected Retroactive Entry:</strong> Date &amp; time is before this vault&apos;s latest checkpoint ({retroactiveAlert.periodLabel}). It will absorb automatically without throwing off your current vault balance.
+              </Alert>
+            )}
+
+            {/* Coin Change Input (optional for Cash purchases) */}
+            {nature === "EXPENSE" && (
+              <CurrencyTextField
+                label="Coin Change Returned to COIN Vault (Optional)"
+                value={coinChangeAmount}
+                onValueChange={(num) => setCoinChangeAmount(num)}
+                showClear
+              />
+            )}
+
+            <TextField
+              label="Notes (Optional)"
+              size="small"
+              fullWidth
+              multiline
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
             />
-          </Box>
-        </Stack>
-      </DialogContent>
-      <DialogActions sx={{ p: 2 }}>
-        <Button onClick={closeTransactionDialog} color="inherit">
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={createTxMutation.isPending || !title || !grossAmount}
-        >
-          {createTxMutation.isPending ? "Saving..." : "Save Transaction"}
-        </Button>
-      </DialogActions>
+          </Stack>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={closeTransactionDialog} color="inherit" disabled={submitMutation.isPending}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="contained" disabled={submitMutation.isPending}>
+            {submitMutation.isPending ? "Recording..." : "Save Transaction"}
+          </Button>
+        </DialogActions>
+      </form>
     </Dialog>
   );
 }
-

@@ -6,37 +6,71 @@ import {
   Box,
   Typography,
   Card,
+  Stack,
+  TextField,
+  MenuItem,
+  Button,
+  Chip,
   Table,
   TableHead,
   TableBody,
   TableRow,
   TableCell,
-  Button,
-  Stack,
-  Chip,
   IconButton,
-  TextField,
-  MenuItem,
   CircularProgress,
+  Alert,
+  InputAdornment,
 } from "@mui/material";
-import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
+import SearchIcon from "@mui/icons-material/Search";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import AddIcon from "@mui/icons-material/Add";
+import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { formatRupiah, toDecimal } from "@/lib/money";
+import { toDecimal } from "@/lib/money";
 import { useLedgerStore } from "@/store/useLedgerStore";
-import ExportModal from "@/components/ExportModal";
-import CustomTransactionModal from "@/components/CustomTransactionModal";
+import MoneyValue from "@/components/MoneyValue";
+
+const PRESET_RANGES = [
+  { value: "1M", label: "1M" },
+  { value: "3M", label: "3M" },
+  { value: "6M", label: "6M" },
+  { value: "YTD", label: "YTD" },
+  { value: "ALL", label: "ALL" },
+  { value: "CUSTOM", label: "Custom" },
+];
+
+const NATURE_FILTERS = [
+  "EXPENSE",
+  "INCOME",
+  "TRANSFER",
+  "RECEIVABLE_LEND",
+  "RECEIVABLE_COLLECT",
+  "PAYABLE_BORROW",
+  "PAYABLE_REPAY",
+  "DEBT_OFFSET",
+  "INITIAL_FUND",
+  "RECONCILIATION_LOST",
+  "RECONCILIATION_GAIN",
+];
 
 export default function LedgerPage() {
   const queryClient = useQueryClient();
-  const openExportDialog = useLedgerStore((s) => s.openExportDialog);
-  const openTransactionDialog = useLedgerStore((s) => s.openTransactionDialog);
+  const {
+    openExportDialog,
+    openTransactionDialog,
+    openConfirmDialog,
+    enqueueToast,
+  } = useLedgerStore();
 
-  const [selectedVaultId, setSelectedVaultId] = useState("");
-  const [selectedNature, setSelectedNature] = useState("");
+  const [preset, setPreset] = useState("3M");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [vaultId, setVaultId] = useState("");
+  const [nature, setNature] = useState("");
+  const [search, setSearch] = useState("");
 
-  const { data: dashData } = useQuery({
+  const { data: dashboardData } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => {
       const res = await fetch("/api/dashboard");
@@ -45,13 +79,17 @@ export default function LedgerPage() {
     },
   });
 
-  const { data: txData, isLoading } = useQuery({
-    queryKey: ["transactions", selectedVaultId, selectedNature],
+  const { data: txData, isLoading, error } = useQuery({
+    queryKey: ["transactions", preset, startDate, endDate, vaultId, nature, search],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (selectedVaultId) params.append("vaultId", selectedVaultId);
-      if (selectedNature) params.append("nature", selectedNature);
-      params.append("limit", "100");
+      const params = new URLSearchParams({ preset, limit: "150" });
+      if (preset === "CUSTOM") {
+        if (startDate) params.set("startDate", startDate);
+        if (endDate) params.set("endDate", endDate);
+      }
+      if (vaultId) params.set("vaultId", vaultId);
+      if (nature) params.set("nature", nature);
+      if (search.trim()) params.set("search", search.trim());
 
       const res = await fetch(`/api/transactions?${params.toString()}`);
       const json = await res.json();
@@ -61,103 +99,173 @@ export default function LedgerPage() {
   });
 
   const deleteTxMutation = useMutation({
-    mutationFn: async (id) => {
-      const res = await fetch(`/api/transactions/${id}`, { method: "DELETE" });
+    mutationFn: async (txId) => {
+      const res = await fetch(`/api/transactions/${txId}`, {
+        method: "DELETE",
+      });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       return json.data;
     },
-    onSuccess: () => {
+    onSuccess: (deleted) => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      queryClient.invalidateQueries({ queryKey: ["debts"] });
+      queryClient.invalidateQueries({ queryKey: ["debt-detail"] });
+      queryClient.invalidateQueries({ queryKey: ["checkpoints"] });
+      enqueueToast(`Reversed transaction "${deleted.title}"`, { severity: "info" });
+    },
+    onError: (err) => {
+      enqueueToast(`Failed to reverse transaction: ${err.message}`, { severity: "error" });
     },
   });
 
+  const vaults = dashboardData?.vaults || [];
   const transactions = txData?.transactions || [];
-  const vaults = dashData?.vaults || [];
-  const parties = dashData?.parties || [];
-  const categories = dashData?.categories || [];
+  const appliedRange = txData?.appliedRange || {};
 
   return (
-    <Container maxWidth="lg" sx={{ py: 2 }}>
-      {/* Title & Actions */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 3 }}>
+    <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 } }}>
+      {/* Page Header */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { sm: "center" }, flexDirection: { xs: "column", sm: "row" }, gap: 1.5, mb: 2.5 }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A", mb: 0.5 }}>
-            General Activity Ledger
+          <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A" }}>
+            Ledger History
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Full chronological double-entry records with automatic multi-vault legs and accounting exports.
+          <Typography variant="caption" color="text.secondary">
+            Showing {transactions.length} of {txData?.total || 0} transactions
+            {appliedRange.startDate ? ` (${appliedRange.startDate} to ${appliedRange.endDate})` : " (All Time)"}
           </Typography>
         </Box>
 
         <Stack direction="row" spacing={1}>
           <Button
+            size="small"
             variant="outlined"
             startIcon={<FileDownloadOutlinedIcon />}
             onClick={openExportDialog}
-            sx={{ borderColor: "#CBD5E1", color: "#334155" }}
+            sx={{ fontWeight: 700 }}
           >
             Export Journal
           </Button>
           <Button
+            size="small"
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => openTransactionDialog(null)}
-            sx={{ bgcolor: "#2563EB" }}
+            sx={{ fontWeight: 700 }}
           >
-            New Transaction
+            Custom Tx
           </Button>
         </Stack>
       </Box>
 
-      {/* Filter Row */}
-      <Card sx={{ p: 2, mb: 3, bgcolor: "#F8FAFC" }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-          <TextField
-            select
-            label="Filter by Vault"
-            size="small"
-            value={selectedVaultId}
-            onChange={(e) => setSelectedVaultId(e.target.value)}
-            sx={{ minWidth: 200 }}
-          >
-            <MenuItem value="">All Vaults</MenuItem>
-            {vaults.map((v) => (
-              <MenuItem key={v.id} value={String(v.id)}>
-                {v.name}
-              </MenuItem>
+      {/* Filters Card (#xx Date Range + Search + Vault + Nature) */}
+      <Card sx={{ p: 2, mb: 2.5 }}>
+        <Stack spacing={1.75}>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+            {PRESET_RANGES.map((opt) => (
+              <Chip
+                key={opt.value}
+                label={opt.label}
+                size="small"
+                clickable
+                color={preset === opt.value ? "primary" : "default"}
+                variant={preset === opt.value ? "filled" : "outlined"}
+                onClick={() => setPreset(opt.value)}
+                sx={{ fontWeight: 700 }}
+              />
             ))}
-          </TextField>
+          </Stack>
 
-          <TextField
-            select
-            label="Filter by Nature"
-            size="small"
-            value={selectedNature}
-            onChange={(e) => setSelectedNature(e.target.value)}
-            sx={{ minWidth: 200 }}
-          >
-            <MenuItem value="">All Types</MenuItem>
-            <MenuItem value="EXPENSE">Expense (Konsumsi)</MenuItem>
-            <MenuItem value="INCOME">Income (Pemasukan)</MenuItem>
-            <MenuItem value="TRANSFER">Transfer (Pindah Saldo)</MenuItem>
-            <MenuItem value="RECEIVABLE_LEND">Lend (Talangan / Kasih Pinjam)</MenuItem>
-            <MenuItem value="RECEIVABLE_COLLECT">Collect (Terima Bayaran Piutang)</MenuItem>
-            <MenuItem value="INITIAL_FUND">Initial Fund (Dana Awal)</MenuItem>
-            <MenuItem value="RECONCILIATION_LOST">Cash Shortage (Uang Hilang)</MenuItem>
-            <MenuItem value="RECONCILIATION_FOUND">Surplus (Bunga Bank / Lebih)</MenuItem>
-          </TextField>
+          {preset === "CUSTOM" && (
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <TextField
+                label="Start Date"
+                type="date"
+                size="small"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <TextField
+                label="End Date"
+                type="date"
+                size="small"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </Stack>
+          )}
+
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+            <TextField
+              size="small"
+              placeholder="Search title, notes, bank ref..."
+              fullWidth
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" color="action" />
+                  </InputAdornment>
+                ),
+              }}
+            />
+
+            <TextField
+              select
+              label="Filter Vault"
+              size="small"
+              sx={{ minWidth: { md: 180 } }}
+              value={vaultId}
+              onChange={(e) => setVaultId(e.target.value)}
+            >
+              <MenuItem value="">All Vaults</MenuItem>
+              {vaults.map((v) => (
+                <MenuItem key={v.id} value={String(v.id)}>
+                  {v.name}
+                </MenuItem>
+              ))}
+            </TextField>
+
+            <TextField
+              select
+              label="Filter Nature"
+              size="small"
+              sx={{ minWidth: { md: 200 } }}
+              value={nature}
+              onChange={(e) => setNature(e.target.value)}
+            >
+              <MenuItem value="">All Natures</MenuItem>
+              {NATURE_FILTERS.map((nat) => (
+                <MenuItem key={nat} value={nat}>
+                  {nat}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Stack>
         </Stack>
       </Card>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Failed to load ledger: {error.message}
+        </Alert>
+      )}
 
       {/* Ledger Table */}
       <Card>
         <Box sx={{ overflowX: "auto" }}>
-          <Table>
+          <Table size="small">
             <TableHead sx={{ bgcolor: "#F8FAFC" }}>
               <TableRow>
-                <TableCell sx={{ fontWeight: 700 }}>Date &amp; Time</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Title &amp; Category</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Party</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>Nature</TableCell>
@@ -182,12 +290,18 @@ export default function LedgerPage() {
                 </TableRow>
               ) : (
                 transactions.map((t) => {
-                  const isExpense = t.nature === "EXPENSE" || t.nature === "RECEIVABLE_LEND";
-                  const isIncome = t.nature === "INCOME" || t.nature === "RECEIVABLE_COLLECT";
+                  const isOutflowNature =
+                    t.nature === "EXPENSE" ||
+                    t.nature === "RECEIVABLE_LEND" ||
+                    t.nature === "PAYABLE_REPAY";
+                  const isInflowNature =
+                    t.nature === "INCOME" ||
+                    t.nature === "RECEIVABLE_COLLECT" ||
+                    t.nature === "PAYABLE_BORROW";
 
                   return (
                     <TableRow key={t.id} hover>
-                      <TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
                         <Typography variant="body2" sx={{ fontWeight: 700 }}>
                           {t.transactionDate?.split("T")[0]}
                         </Typography>
@@ -195,19 +309,44 @@ export default function LedgerPage() {
                           {t.transactionTime}
                         </Typography>
                       </TableCell>
+
                       <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                          {t.title}
-                        </Typography>
+                        <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                            {t.title}
+                          </Typography>
+                          {t.isBackdated && (
+                            <Chip
+                              label="Retroactive"
+                              size="small"
+                              color="info"
+                              variant="outlined"
+                              sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
+                            />
+                          )}
+                        </Stack>
+
                         {t.category && (
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                             {t.category.name} ({t.commitmentType})
                           </Typography>
                         )}
+
+                        {t.counterpartyAccountNote && (
+                          <Chip
+                            icon={<AccountBalanceOutlinedIcon sx={{ fontSize: "0.72rem !important" }} />}
+                            label={t.counterpartyAccountNote}
+                            size="small"
+                            variant="outlined"
+                            sx={{ mt: 0.5, height: 20, fontSize: "0.66rem", bgcolor: "#F8FAFC" }}
+                          />
+                        )}
                       </TableCell>
+
                       <TableCell>
-                        <Chip label={t.party.name} size="small" sx={{ fontSize: "0.7rem", height: 20 }} />
+                        <Chip label={t.party?.name || "Self"} size="small" sx={{ fontSize: "0.7rem", height: 20 }} />
                       </TableCell>
+
                       <TableCell>
                         <Chip
                           label={t.nature}
@@ -215,43 +354,59 @@ export default function LedgerPage() {
                           sx={{
                             fontSize: "0.65rem",
                             height: 20,
-                            bgcolor: isExpense ? "#FEE2E2" : isIncome ? "#DCFCE7" : "#F1F5F9",
-                            color: isExpense ? "#DC2626" : isIncome ? "#16A34A" : "#475569",
+                            bgcolor: isOutflowNature ? "#FEE2E2" : isInflowNature ? "#DCFCE7" : "#F1F5F9",
+                            color: isOutflowNature ? "#DC2626" : isInflowNature ? "#16A34A" : "#475569",
                             fontWeight: 700,
                           }}
                         />
                       </TableCell>
+
                       <TableCell>
                         <Stack spacing={0.5}>
-                          {t.legs?.map((leg) => (
-                            <Typography key={leg.id} variant="caption" sx={{ display: "block" }}>
-                              <strong>{leg.vault?.name}:</strong>{" "}
-                              {toDecimal(leg.netMutation).greaterThan(0) ? "+" : ""}
-                              {formatRupiah(leg.netMutation)}
+                          {t.legs && t.legs.length > 0 ? (
+                            t.legs.map((leg) => (
+                              <Typography key={leg.id} variant="caption" sx={{ display: "block", whiteSpace: "nowrap" }}>
+                                <strong>{leg.vault?.name}:</strong>{" "}
+                                {toDecimal(leg.netMutation).greaterThan(0) ? "+" : ""}
+                                <MoneyValue value={leg.netMutation} includeCents />
+                              </Typography>
+                            ))
+                          ) : (
+                            <Typography variant="caption" color="text.secondary">
+                              Non-vault (Debt/Offset)
                             </Typography>
-                          ))}
+                          )}
                         </Stack>
                       </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 800 }}>
-                        {formatRupiah(t.grossAmount)}
+
+                      <TableCell align="right" sx={{ fontWeight: 800, whiteSpace: "nowrap" }}>
+                        <MoneyValue value={t.grossAmount} includeCents allowTapToggle />
                       </TableCell>
+
                       <TableCell
                         align="right"
                         sx={{
                           fontWeight: 700,
+                          whiteSpace: "nowrap",
                           color: Number(t.consumeAmount) < 0 ? "#DC2626" : "#64748B",
                         }}
                       >
-                        {formatRupiah(t.consumeAmount)}
+                        <MoneyValue value={t.consumeAmount} allowTapToggle />
                       </TableCell>
+
                       <TableCell align="center">
                         <IconButton
                           size="small"
-                          onClick={() => {
-                            if (confirm(`Reverse transaction #${t.id} (${t.title})?`)) {
-                              deleteTxMutation.mutate(t.id);
-                            }
-                          }}
+                          disabled={deleteTxMutation.isPending}
+                          onClick={() =>
+                            openConfirmDialog({
+                              title: "Reverse & Delete Transaction?",
+                              message: `Reverse transaction #${t.id} ("${t.title}")? This atomically restores affected vault balances, debt entries, and ledger snapshots.`,
+                              confirmLabel: "Reverse & Delete",
+                              confirmColor: "error",
+                              onConfirm: () => deleteTxMutation.mutateAsync(t.id),
+                            })
+                          }
                           sx={{ color: "#94A3B8", "&:hover": { color: "#EF4444" } }}
                         >
                           <DeleteOutlineIcon fontSize="small" />
@@ -265,10 +420,6 @@ export default function LedgerPage() {
           </Table>
         </Box>
       </Card>
-
-      <ExportModal />
-      <CustomTransactionModal vaults={vaults} parties={parties} categories={categories} />
     </Container>
   );
 }
-

@@ -53,3 +53,14 @@ Dokumen ini mencatat status seluruh modul yang sudah dirancang maupun yang akan 
 - `[x]` **Excel General Ledger Injector Tool**: Script `inject-excel.js` (`npm run inject-excel`) untuk menyuntikkan data transaksi nyata dari sheet *Buku Besar Update* `Financial Management.xlsx` ke database SQLite lokal secara atomik, presisi sen, dan otomatis menghasilkan mockup penuh.
 - `[x]` **Clean UI & Rule 11 Compliance**: Info popover `(i)` pada Net Wealth dan 3-Tier Layer, mobile-first Material UI layout, dan 5-second Undo Snackbar (`UndoSnackbar.jsx`).
 
+---
+
+## Phase 6: Backlog v2 Overhaul & Debt Sub-Ledger Expansion (IMPLEMENTED)
+- `[x]` **Analytics Overhaul (`/analytics`)**: Stacked interval Cashflow Waterfall Chart (`4.png`), Daily Consumption negative curve with linear trendline (`1..png`), Monthly Consumption negative bars (`2.png`), Top Consumptive Expenses list (`3.png`), Vault Usage Frequency chart (`#6`), Wealth Trajectory Timeline (`#5`), Month-over-Month Net Wealth comparison badge (`#24`), and Date Range Filters (`1M`/`3M`/`6M`/`YTD`/`ALL`/`CUSTOM`, `#xx`).
+- `[x]` **Ledger Date Range & Search (`/ledger`)**: Date range presets (`1M`/`3M`/`6M`/`YTD`/`ALL`/`CUSTOM`), keyword search, counterparty external bank badge, and atomic reverse confirmation modal.
+- `[x]` **Global Compact/Exact & Full Privacy Mode**: Global top-bar compact toggle (`1jt` vs `Rp Full`) + local tap-to-exact `<MoneyValue>` (`#7`), full Privacy Eye masking (`#8`) across KPIs, cards, tables, and chart axes/tooltips, plus live thousand-dot `<CurrencyTextField>` inputs (`#9`).
+- `[x]` **In-House Toast Stack & Confirm Dialog (`ToastProvider.jsx`)**: Replaced all native browser `alert()`/`confirm()` with stacked MUI toasts + 5-second Undo actions and global confirm modal (`#14`, `#20`).
+- `[x]` **Smart Action Cards v2**: Recommended vs All Cards & Search tabs, 2-tier visibility hiding (`SOFT_HIDDEN` vs `ARCHIVED`), `ManageCardsModal.jsx` (create/edit/restore cards), inline manual amount input (`#16`), and 1-tap `X` Reset card button (`#18`).
+- `[x]` **Reconcile & Retroactive Precision**: Fixed `runningTotalWealth` chronological recompute in `POST /api/reconcile`, full React Query invalidation (`#19`), exact Date + Time + `Now` picker (`#10`), auto-detected retroactive warning (`#15`), removed recent transactions snippet from `/` (`#12`), and Amber Warning styling for Unaccounted Cash Shortage (`#13`).
+- `[x]` **Two-Way Debt, Payables, External Bank Notes & Merge**: `+ Add Contact` modal, `PAYABLE_BORROW` (`EXPENSE_TALANG` vs `CASH_LOAN`), `PAYABLE_REPAY` & `RECEIVABLE_COLLECT` with specific vs FIFO `"Totalan"`, external bank note autocomplete (`externalAccountsJson`), partial/FIFO Write-Off (`#21`), dedicated Party Detail Page `/debts/[id]` (`#22`), separated Receivables/Payables without auto-netting, and Manual Offset Merge (`DEBT_OFFSET`, `#22-2`).
+

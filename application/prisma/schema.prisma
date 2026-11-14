@@ -79,7 +79,10 @@ model Party {
   name                 String   // Isa, Ibrahim (Dada), Fernando (Nando), Slamet (Amet)
   aliasesJson          String?  // JSON array of search aliases e.g. ["Dada", "Sidada"]
   partyType            String   // SELF, FAMILY, FRIEND, EMPLOYER, INSTITUTION, LENDER
-  netReceivableBalance Decimal  @default(0) // (+) Party owes Isa, (-) Isa owes Party
+  netReceivableBalance Decimal  @default(0) // Net balance: (+) Party owes Isa, (-) Isa owes Party
+  receivableBalance    Decimal  @default(0) // Separate receivable total owed to Isa
+  payableBalance       Decimal  @default(0) // Separate payable total Isa owes to party
+  externalAccountsJson String?  // JSON array of counterparty bank/wallet accounts e.g. ["BRI - Amet"]
   heldFundBalance      Decimal  @default(0) // Undisbursed third-party entitlement (e.g. Taspen/Dada)
   isActive             Boolean  @default(true)
   createdAt            DateTime @default(now())
@@ -141,6 +144,7 @@ model ActionCard {
   oneTapSubmit       Boolean   @default(false) // 1-tap submit with 5s undo snackbar
   expectedCadence    String?   // DAILY_WORKDAY, DAILY_ANY, WEEKLY, MONTHLY, ON_DEMAND
   pinPriority        Int       @default(0) // Higher number appears first
+  visibilityMode     String    @default("ACTIVE") // ACTIVE, SOFT_HIDDEN, ARCHIVED
   isActive           Boolean   @default(true)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -228,21 +232,22 @@ model Transaction {
   transactionDate      DateTime  // Business transaction date
   transactionTime      String    // HH:mm format e.g. "17:45"
   monthTag             String    // "Apr,2026" format
-  title                String    // "Parkir kantor", "Jajan Americano Orange FM"
-  nature               String    // EXPENSE, INCOME, TRANSFER, RECEIVABLE_LEND, RECEIVABLE_COLLECT, RECEIVABLE_WRITEOFF, PAYABLE_BORROW, PAYABLE_REPAY, INITIAL_FUND, RECONCILIATION_LOST, RECONCILIATION_FOUND
-  categoryId           Int?
-  commitmentType       String    // FIXED_MANDATORY, VARIABLE_ESSENTIAL, DISCRETIONARY_JAJAN, SOCIAL_CHARITY, NONE
-  priorityTier         String    // PRIMER, SEKUNDER, TERSIER, NONE
-  partyId              Int
-  actionCardId         Int?
-  parentTransactionId  Int?      // Links tax/fee split row to the primary transaction
-  grossAmount          Decimal
-  consumeAmount        Decimal   // (-) For self consumption expenses, (0) for transfer/debt/initial
-  incomeAmount         Decimal   // (+) For true personal income, (0) otherwise
-  isBackdated          Boolean   @default(false)
-  linkedCheckpointId   Int?      // References checkpoint if this transaction absorbed initial fund or explained lost cash
-  proofFilePath        String?   // Local file path for uploaded receipt
-  notes                String?
+  title                   String    // "Parkir kantor", "Jajan Americano Orange FM"
+  nature                  String    // EXPENSE, INCOME, TRANSFER, RECEIVABLE_LEND, RECEIVABLE_COLLECT, RECEIVABLE_WRITEOFF, PAYABLE_BORROW, PAYABLE_REPAY, DEBT_OFFSET, INITIAL_FUND, RECONCILIATION_LOST, RECONCILIATION_FOUND
+  categoryId              Int?
+  commitmentType          String    // FIXED_MANDATORY, VARIABLE_ESSENTIAL, DISCRETIONARY_JAJAN, SOCIAL_CHARITY, NONE
+  priorityTier            String    // PRIMER, SEKUNDER, TERSIER, NONE
+  partyId                 Int
+  actionCardId            Int?
+  parentTransactionId     Int?      // Links tax/fee split row to the primary transaction
+  grossAmount             Decimal
+  consumeAmount           Decimal   // (-) For self consumption expenses, (0) for transfer/debt/initial
+  incomeAmount            Decimal   // (+) For true personal income, (0) otherwise
+  isBackdated             Boolean   @default(false)
+  linkedCheckpointId      Int?      // References checkpoint if this transaction absorbed initial fund or explained lost cash
+  counterpartyAccountNote String?   // Optional external bank or e-wallet note belonging to counterparty
+  proofFilePath           String?   // Local file path for uploaded receipt
+  notes                   String?
 
   // Relations
   category             Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)

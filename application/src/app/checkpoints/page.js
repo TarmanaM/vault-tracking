@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   Container,
   Box,
@@ -9,27 +9,29 @@ import {
   Card,
   CardContent,
   Button,
-  Stack,
   Chip,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
+  Stack,
   CircularProgress,
+  Alert,
+  Divider,
+  IconButton,
+  Popover,
 } from "@mui/material";
 import SyncAltIcon from "@mui/icons-material/SyncAlt";
-import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
-import MonetizationOnIcon from "@mui/icons-material/MonetizationOn";
+import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import HistoryOutlinedIcon from "@mui/icons-material/HistoryOutlined";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useQuery } from "@tanstack/react-query";
-import { formatRupiah } from "@/lib/money";
 import { useLedgerStore } from "@/store/useLedgerStore";
-import ReconcileModal from "@/components/ReconcileModal";
+import MoneyValue from "@/components/MoneyValue";
 
 export default function CheckpointsPage() {
-  const openReconcileDialog = useLedgerStore((s) => s.openReconcileDialog);
+  const { openReconcileDialog } = useLedgerStore();
+  const [infoAnchor, setInfoAnchor] = useState(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["checkpoints"],
     queryFn: async () => {
       const res = await fetch("/api/reconcile");
@@ -47,169 +49,223 @@ export default function CheckpointsPage() {
     );
   }
 
-  const { checkpoints = [], vaults = [] } = data || {};
+  if (error || !data) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Alert severity="error">Failed to load checkpoints: {error?.message || "Unknown error"}</Alert>
+      </Container>
+    );
+  }
+
+  const vaults = data.vaults || [];
+  const checkpoints = data.checkpoints || [];
 
   return (
-    <Container maxWidth="lg" sx={{ py: 2 }}>
-      {/* Title & Header */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 3 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A", mb: 0.5 }}>
-            Vaults &amp; Physical Checkpoint Audits
+    <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 } }}>
+      {/* Page Header */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.5, mb: 3 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <AccountBalanceWalletIcon color="primary" />
+          <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A" }}>
+            Vaults &amp; Physical Checkpoints
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Perform physical count audits, reconcile Cash D1/D2 and Coin pieces, and manage baseline initial funds.
-          </Typography>
-        </Box>
+          <IconButton size="small" onClick={(e) => setInfoAnchor(e.currentTarget)}>
+            <InfoOutlinedIcon fontSize="small" />
+          </IconButton>
+        </Stack>
 
         <Button
           variant="contained"
           startIcon={<SyncAltIcon />}
           onClick={() => openReconcileDialog(null)}
-          sx={{ bgcolor: "#2563EB" }}
+          sx={{ fontWeight: 700 }}
         >
-          New Checkpoint Audit
+          Audit &amp; Reconcile Vault
         </Button>
       </Box>
 
-      {/* Vaults Grid */}
-      <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#475569", mb: 1.5, letterSpacing: 0.5 }}>
-        ACTIVE STORAGE VAULTS &amp; WALLETS
-      </Typography>
+      {/* Info Popover (Rule 11) */}
+      <Popover
+        open={Boolean(infoAnchor)}
+        anchorEl={infoAnchor}
+        onClose={() => setInfoAnchor(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+      >
+        <Typography variant="caption" sx={{ p: 1.5, display: "block", maxWidth: 320 }}>
+          <strong>Physical Audit Checkpoints:</strong> Anchor your live cash/coin/bank balances whenever counting manually. Any backdated transactions recorded before the latest checkpoint automatically absorb into unexplained discrepancies without corrupting your current balance.
+        </Typography>
+      </Popover>
 
+      {/* Vaults Overview Grid */}
+      <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#475569", mb: 1.5 }}>
+        ACTIVE VAULTS ({vaults.length})
+      </Typography>
       <Grid container spacing={2} sx={{ mb: 4 }}>
-        {vaults.map((vault) => (
-          <Grid item xs={12} sm={6} md={4} key={vault.id}>
-            <Card sx={{ height: "100%", borderTop: `4px solid ${vault.colorHex || "#2563EB"}` }}>
-              <CardContent sx={{ p: 2.5 }}>
-                <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1.5 }}>
-                  <Box>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
-                      {vault.name}
+        {vaults.map((v) => {
+          const isNegative = Number(v.currentBalance) < 0;
+          return (
+            <Grid item xs={12} sm={6} md={4} key={v.id}>
+              <Card sx={{ height: "100%", borderTop: `3px solid ${v.colorHex || "#2563EB"}` }}>
+                <CardContent sx={{ p: 2, display: "flex", flexDirection: "column", height: "100%", gap: 1 }}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                      {v.name}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {vault.vaultType.replace("_", " ")}
-                    </Typography>
+                    <Chip label={v.vaultType} size="small" sx={{ fontSize: "0.65rem", height: 20 }} />
                   </Box>
 
-                  <Chip label={vault.code} size="small" sx={{ fontWeight: 700, fontSize: "0.7rem" }} />
-                </Box>
+                  <Typography variant="h6" sx={{ fontWeight: 800, color: isNegative ? "#DC2626" : "#0F172A" }}>
+                    <MoneyValue value={v.currentBalance} includeCents allowTapToggle />
+                  </Typography>
 
-                <Typography variant="h6" sx={{ fontWeight: 800, color: Number(vault.currentBalance) < 0 ? "#EF4444" : "#0F172A", mb: 1 }}>
-                  {formatRupiah(vault.currentBalance)}
-                </Typography>
+                  {v.subContainers && v.subContainers.length > 0 && (
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                      {v.subContainers.map((sc) => (
+                        <Chip
+                          key={sc.id}
+                          size="small"
+                          label={
+                            <>
+                              {sc.code}: <MoneyValue value={sc.lastCountedBalance} />
+                            </>
+                          }
+                          sx={{ fontSize: "0.68rem", height: 22, bgcolor: "#F1F5F9" }}
+                        />
+                      ))}
+                    </Stack>
+                  )}
 
-                {/* Sub-containers */}
-                {vault.subContainers && vault.subContainers.length > 0 && (
-                  <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-                    {vault.subContainers.map((sc) => (
-                      <Chip
-                        key={sc.id}
-                        label={`${sc.name}: ${formatRupiah(sc.lastCountedBalance)}`}
-                        size="small"
-                        sx={{ fontSize: "0.7rem", bgcolor: "#F1F5F9" }}
-                      />
-                    ))}
-                  </Stack>
-                )}
-
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  size="small"
-                  startIcon={<SyncAltIcon />}
-                  onClick={() => openReconcileDialog(vault.id)}
-                  sx={{ borderColor: "#CBD5E1", color: "#334155" }}
-                >
-                  Audit This Vault
-                </Button>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
+                  <Box sx={{ mt: "auto", pt: 1 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      fullWidth
+                      startIcon={<SyncAltIcon />}
+                      onClick={() => openReconcileDialog(v.id)}
+                      sx={{ fontWeight: 700 }}
+                    >
+                      Audit {v.name}
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
       </Grid>
 
-      {/* Historical Checkpoints Log */}
-      <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#475569", mb: 1.5, letterSpacing: 0.5 }}>
-        PAST AUDIT CHECKPOINTS &amp; DISCREPANCY LOGS
-      </Typography>
+      {/* Checkpoint History Timeline */}
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+        <HistoryOutlinedIcon color="action" fontSize="small" />
+        <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#475569" }}>
+          RECENT AUDIT CHECKPOINTS &amp; COIN COUNTS ({checkpoints.length})
+        </Typography>
+      </Stack>
 
-      <Card>
-        <Box sx={{ overflowX: "auto" }}>
-          <Table>
-            <TableHead sx={{ bgcolor: "#F8FAFC" }}>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 700 }}>Period / Date</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Vault</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="right">Physical Count</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="right">System Book</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="right">Raw Discrepancy</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {checkpoints.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} sx={{ textAlign: "center", py: 4, color: "#64748B" }}>
-                    No audit checkpoints recorded yet. Tap &quot;New Checkpoint Audit&quot; above to perform your first physical count!
-                  </TableCell>
-                </TableRow>
-              ) : (
-                checkpoints.map((cp) => {
-                  const diff = Number(cp.rawDiscrepancyAmount);
-                  return (
-                    <TableRow key={cp.id} hover>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                          {cp.periodLabel || "Audit"}
+      {checkpoints.length === 0 ? (
+        <Alert severity="info">No audit checkpoints recorded yet. Click Audit Vault to create your first checkpoint.</Alert>
+      ) : (
+        <Stack spacing={1.5}>
+          {checkpoints.map((cp) => {
+            const unexplained = Number(cp.unexplainedDiscrepancyAmount || 0);
+            const rawDiff = Number(cp.rawDiscrepancyAmount || 0);
+            const hasShortage = unexplained < 0;
+
+            return (
+              <Card
+                key={cp.id}
+                sx={{
+                  borderLeft: hasShortage
+                    ? "4px solid #D97706"
+                    : rawDiff > 0
+                    ? "4px solid #10B981"
+                    : "4px solid #2563EB",
+                  bgcolor: hasShortage ? "#FFFBEB" : "#FFFFFF",
+                }}
+              >
+                <CardContent sx={{ p: 2 }}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 1, mb: 1 }}>
+                    <Box>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                          {cp.vault?.name} — {cp.periodLabel}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {cp.checkpointDate?.split("T")[0]}
-                        </Typography>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>{cp.vault.name}</TableCell>
-                      <TableCell>
+                        <Chip label={cp.checkpointType} size="small" sx={{ height: 20, fontSize: "0.65rem" }} />
+                        {hasShortage ? (
+                          <Chip
+                            icon={<WarningAmberIcon sx={{ fontSize: "0.85rem !important", color: "#B45309 !important" }} />}
+                            label="Unresolved Shortage"
+                            size="small"
+                            sx={{ height: 20, fontSize: "0.65rem", bgcolor: "#FEF3C7", color: "#92400E", fontWeight: 700 }}
+                          />
+                        ) : (
+                          <Chip
+                            icon={<CheckCircleOutlineIcon sx={{ fontSize: "0.85rem !important" }} />}
+                            label="Synced"
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                            sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }}
+                          />
+                        )}
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary">
+                        {new Date(cp.checkpointTimestamp).toLocaleString()}
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ textAlign: { xs: "left", sm: "right" } }}>
+                      <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                        Counted: <MoneyValue value={cp.originalCountedAmount} includeCents allowTapToggle />
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Book Before: <MoneyValue value={cp.systemBookBalanceBefore} includeCents />
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  <Divider sx={{ my: 1 }} />
+
+                  <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: rawDiff < 0 ? "#D97706" : rawDiff > 0 ? "#10B981" : "#475569" }}>
+                      Raw Diff: {rawDiff > 0 ? "+" : ""}
+                      <MoneyValue value={rawDiff} includeCents />
+                    </Typography>
+
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: unexplained < 0 ? "#B45309" : "#475569" }}>
+                      Unexplained Left: <MoneyValue value={unexplained} includeCents />
+                    </Typography>
+
+                    <Typography variant="caption" color="text.secondary">
+                      Effective Anchor: <MoneyValue value={cp.effectiveAnchorAmount} includeCents />
+                    </Typography>
+
+                    {cp.linkedTransactions && cp.linkedTransactions.length > 0 && (
+                      <Typography variant="caption" color="primary" sx={{ fontWeight: 700 }}>
+                        Absorbed Entries: {cp.linkedTransactions.length}
+                      </Typography>
+                    )}
+                  </Stack>
+
+                  {cp.denominations && cp.denominations.length > 0 && (
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                      {cp.denominations.map((d) => (
                         <Chip
-                          label={cp.checkpointType === "INITIAL_FUND" ? "Dana Awal" : "Periodic Audit"}
+                          key={d.id}
                           size="small"
-                          sx={{ fontSize: "0.65rem", height: 20 }}
-                        />
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 700 }}>
-                        {formatRupiah(cp.originalCountedAmount)}
-                      </TableCell>
-                      <TableCell align="right" sx={{ color: "#64748B" }}>
-                        {formatRupiah(cp.systemBookBalanceBefore)}
-                      </TableCell>
-                      <TableCell
-                        align="right"
-                        sx={{
-                          fontWeight: 800,
-                          color: diff < 0 ? "#DC2626" : diff > 0 ? "#16A34A" : "#0F172A",
-                        }}
-                      >
-                        {diff < 0 ? formatRupiah(diff) : diff > 0 ? `+${formatRupiah(diff)}` : "Rp 0"}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={diff === 0 ? "Synced" : diff < 0 ? "Shortage Handled" : "Surplus Handled"}
-                          size="small"
-                          color={diff === 0 ? "default" : diff < 0 ? "error" : "success"}
+                          label={`${d.label}: ${d.quantity} pcs`}
                           variant="outlined"
-                          sx={{ fontSize: "0.65rem", height: 20 }}
+                          sx={{ height: 20, fontSize: "0.66rem", bgcolor: "#F8FAFC" }}
                         />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </Box>
-      </Card>
-
-      <ReconcileModal vaults={vaults} />
+                      ))}
+                    </Stack>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </Stack>
+      )}
     </Container>
   );
 }

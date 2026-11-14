@@ -15,7 +15,7 @@ import {
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import SyncAltIcon from "@mui/icons-material/SyncAlt";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
-import { formatRupiah } from "@/lib/money";
+import MoneyValue from "@/components/MoneyValue";
 import { useLedgerStore } from "@/store/useLedgerStore";
 
 export default function HeaderSummary({ summary }) {
@@ -49,7 +49,7 @@ export default function HeaderSummary({ summary }) {
               </IconButton>
             </Stack>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, letterSpacing: -0.5 }}>
-              {formatRupiah(summary.netTotalWealth, true)}
+              <MoneyValue value={summary.netTotalWealth} includeCents allowTapToggle />
             </Typography>
           </Box>
 
@@ -88,7 +88,7 @@ export default function HeaderSummary({ summary }) {
               Liquid Funds (Banks &amp; Cash)
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, color: "#10B981" }}>
-              {formatRupiah(summary.liquidWealth)}
+              <MoneyValue value={summary.liquidWealth} allowTapToggle />
             </Typography>
           </Box>
 
@@ -97,7 +97,7 @@ export default function HeaderSummary({ summary }) {
               Third-Party Receivables (Piutang)
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, color: "#38BDF8" }}>
-              {formatRupiah(summary.totalReceivables)}
+              <MoneyValue value={summary.totalReceivables} allowTapToggle />
             </Typography>
           </Box>
 
@@ -106,7 +106,7 @@ export default function HeaderSummary({ summary }) {
               Payables &amp; PayLater (Utang)
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, color: "#F87171" }}>
-              {formatRupiah(summary.totalPayables)}
+              <MoneyValue value={summary.totalPayables} allowTapToggle />
             </Typography>
           </Box>
 
@@ -116,7 +116,7 @@ export default function HeaderSummary({ summary }) {
                 Held Fund Pool (Taspen)
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 700, color: "#A78BFA" }}>
-                {formatRupiah(summary.heldPoolWealth)}
+                <MoneyValue value={summary.heldPoolWealth} allowTapToggle />
               </Typography>
             </Box>
           )}

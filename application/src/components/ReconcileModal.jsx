@@ -16,11 +16,12 @@ import {
   Grid,
 } from "@mui/material";
 import { useLedgerStore } from "@/store/useLedgerStore";
-import { formatRupiah } from "@/lib/money";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import CurrencyTextField from "@/components/CurrencyTextField";
+import MoneyValue from "@/components/MoneyValue";
 
 export default function ReconcileModal({ vaults = [] }) {
-  const { reconcileDialog, closeReconcileDialog } = useLedgerStore();
+  const { reconcileDialog, closeReconcileDialog, enqueueToast } = useLedgerStore();
   const queryClient = useQueryClient();
 
   const [selectedVaultId, setSelectedVaultId] = useState("");
@@ -31,7 +32,7 @@ export default function ReconcileModal({ vaults = [] }) {
   const [d1Balance, setD1Balance] = useState("");
   const [d2Balance, setD2Balance] = useState("");
 
-  // Coin Denomination pieces (1000, 500, 200, 100)
+  // Coin denomination pieces (1000, 500, 200, 100)
   const [coin1000, setCoin1000] = useState("");
   const [coin500, setCoin500] = useState("");
   const [coin200, setCoin200] = useState("");
@@ -40,30 +41,46 @@ export default function ReconcileModal({ vaults = [] }) {
   const activeVault = vaults.find((v) => v.id === parseInt(selectedVaultId, 10));
 
   useEffect(() => {
-    if (reconcileDialog.vaultId) {
-      setSelectedVaultId(String(reconcileDialog.vaultId));
-    } else if (vaults.length > 0 && !selectedVaultId) {
-      setSelectedVaultId(String(vaults[0].id));
+    if (reconcileDialog.open) {
+      if (reconcileDialog.vaultId) {
+        setSelectedVaultId(String(reconcileDialog.vaultId));
+      } else if (vaults.length > 0 && !selectedVaultId) {
+        setSelectedVaultId(String(vaults[0].id));
+      }
     }
-  }, [reconcileDialog.vaultId, vaults]);
+  }, [reconcileDialog.open, reconcileDialog.vaultId, vaults, selectedVaultId]);
 
-  // Auto calculate sum if Cash sub-containers change
+  const handleVaultChange = (newId) => {
+    setSelectedVaultId(newId);
+    setActualBalanceInput("");
+    setD1Balance("");
+    setD2Balance("");
+    setCoin1000("");
+    setCoin500("");
+    setCoin200("");
+    setCoin100("");
+  };
+
+  // Auto-calculate sum if Cash sub-containers change
   useEffect(() => {
-    if (activeVault?.code === "CASH") {
+    if (activeVault?.code === "CASH" && (d1Balance !== "" || d2Balance !== "")) {
       const sum = (Number(d1Balance) || 0) + (Number(d2Balance) || 0);
-      setActualBalanceInput(String(sum));
+      setActualBalanceInput(sum);
     }
   }, [d1Balance, d2Balance, activeVault]);
 
-  // Auto calculate sum if Coin denominations change
+  // Auto-calculate sum if Coin denominations change
   useEffect(() => {
-    if (activeVault?.code === "COIN") {
+    if (
+      activeVault?.code === "COIN" &&
+      (coin1000 !== "" || coin500 !== "" || coin200 !== "" || coin100 !== "")
+    ) {
       const sum =
         (Number(coin1000) || 0) * 1000 +
         (Number(coin500) || 0) * 500 +
         (Number(coin200) || 0) * 200 +
         (Number(coin100) || 0) * 100;
-      setActualBalanceInput(String(sum));
+      setActualBalanceInput(sum);
     }
   }, [coin1000, coin500, coin200, coin100, activeVault]);
 
@@ -78,18 +95,32 @@ export default function ReconcileModal({ vaults = [] }) {
       if (!data.success) throw new Error(data.error);
       return data.data;
     },
-    onSuccess: () => {
+    onSuccess: (resData) => {
+      // Invalidate all dependent queries including checkpoints, analytics, and debts (#19)
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["checkpoints"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      queryClient.invalidateQueries({ queryKey: ["debts"] });
+      queryClient.invalidateQueries({ queryKey: ["debt-detail"] });
       closeReconcileDialog();
-      alert("Vault reconciled successfully!");
+      setActualBalanceInput("");
+      const vaultLabel = activeVault?.name || "Vault";
+      const diff = Number(resData?.discrepancy || 0);
+      enqueueToast(
+        diff === 0
+          ? `${vaultLabel} reconciled & 100% synced.`
+          : `${vaultLabel} reconciled cleanly.`,
+        { severity: "success" }
+      );
     },
     onError: (err) => {
-      alert(`Reconciliation error: ${err.message}`);
+      enqueueToast(`Reconciliation error: ${err.message}`, { severity: "error" });
     },
   });
 
   const handleSubmit = () => {
+    if (!activeVault) return;
     const counted = Number(actualBalanceInput) || 0;
     const denominations = [];
     const subContainers = [];
@@ -128,13 +159,13 @@ export default function ReconcileModal({ vaults = [] }) {
             select
             label="Select Storage Vault"
             value={selectedVaultId}
-            onChange={(e) => setSelectedVaultId(e.target.value)}
+            onChange={(e) => handleVaultChange(e.target.value)}
             fullWidth
             size="small"
           >
             {vaults.map((v) => (
               <MenuItem key={v.id} value={String(v.id)}>
-                {v.name} (Current: {formatRupiah(v.currentBalance)})
+                {v.name} (Current: <MoneyValue value={v.currentBalance} includeCents />)
               </MenuItem>
             ))}
           </TextField>
@@ -159,23 +190,19 @@ export default function ReconcileModal({ vaults = [] }) {
               </Typography>
               <Grid container spacing={2}>
                 <Grid item xs={6}>
-                  <TextField
+                  <CurrencyTextField
                     label="Dompet D1 (Utama)"
-                    type="number"
-                    size="small"
-                    fullWidth
                     value={d1Balance}
-                    onChange={(e) => setD1Balance(e.target.value)}
+                    onValueChange={(num) => setD1Balance(num)}
+                    showClear
                   />
                 </Grid>
                 <Grid item xs={6}>
-                  <TextField
+                  <CurrencyTextField
                     label="Dompet D2 (Cadangan)"
-                    type="number"
-                    size="small"
-                    fullWidth
                     value={d2Balance}
-                    onChange={(e) => setD2Balance(e.target.value)}
+                    onValueChange={(num) => setD2Balance(num)}
+                    showClear
                   />
                 </Grid>
               </Grid>
@@ -234,16 +261,16 @@ export default function ReconcileModal({ vaults = [] }) {
           )}
 
           {/* Total Physical Count Input */}
-          <TextField
-            label="Total Actual Physical Balance (Rp)"
-            type="number"
+          <CurrencyTextField
+            label="Total Actual Physical Balance"
             value={actualBalanceInput}
-            onChange={(e) => setActualBalanceInput(e.target.value)}
-            fullWidth
+            onValueChange={(num) => setActualBalanceInput(num)}
             required
+            showClear
+            size="medium"
           />
 
-          {/* Discrepancy Card */}
+          {/* Discrepancy Preview Card */}
           <Box sx={{ bgcolor: "#F1F5F9", p: 2, borderRadius: 2 }}>
             <Stack spacing={0.5}>
               <Box sx={{ display: "flex", justifyContent: "space-between" }}>
@@ -251,7 +278,7 @@ export default function ReconcileModal({ vaults = [] }) {
                   System Book Balance:
                 </Typography>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  {formatRupiah(bookNum)}
+                  <MoneyValue value={bookNum} includeCents allowTapToggle />
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", justifyContent: "space-between" }}>
@@ -259,7 +286,7 @@ export default function ReconcileModal({ vaults = [] }) {
                   Physical Counted:
                 </Typography>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  {formatRupiah(countedNum)}
+                  <MoneyValue value={countedNum} includeCents allowTapToggle />
                 </Typography>
               </Box>
               <Divider sx={{ my: 0.5 }} />
@@ -271,14 +298,20 @@ export default function ReconcileModal({ vaults = [] }) {
                   variant="body2"
                   sx={{
                     fontWeight: 800,
-                    color: diffNum < 0 ? "#DC2626" : diffNum > 0 ? "#10B981" : "#0F172A",
+                    color: diffNum < 0 ? "#D97706" : diffNum > 0 ? "#10B981" : "#0F172A",
                   }}
                 >
-                  {diffNum < 0
-                    ? `${formatRupiah(diffNum)} (Uang Hilang)`
-                    : diffNum > 0
-                    ? `+${formatRupiah(diffNum)} (Bunga / Surplus)`
-                    : "Rp 0 (100% Synced)"}
+                  {diffNum < 0 ? (
+                    <>
+                      <MoneyValue value={diffNum} includeCents /> (Shortage / Belum Tercatat)
+                    </>
+                  ) : diffNum > 0 ? (
+                    <>
+                      +<MoneyValue value={diffNum} includeCents /> (Interest / Surplus)
+                    </>
+                  ) : (
+                    "Rp 0 (100% Synced)"
+                  )}
                 </Typography>
               </Box>
             </Stack>
@@ -292,7 +325,7 @@ export default function ReconcileModal({ vaults = [] }) {
         <Button
           onClick={handleSubmit}
           variant="contained"
-          disabled={reconcileMutation.isPending || !actualBalanceInput}
+          disabled={reconcileMutation.isPending || actualBalanceInput === ""}
         >
           {reconcileMutation.isPending ? "Syncing..." : "Confirm & Sync Balance"}
         </Button>
@@ -300,4 +333,3 @@ export default function ReconcileModal({ vaults = [] }) {
     </Dialog>
   );
 }
-
