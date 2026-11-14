@@ -37,24 +37,27 @@ Kategori fungsional (*Parkir*, *BBM/Bensin*, *Makan Utama*, *Kopi & Minuman*, *J
 
 ---
 
-## 2. Relational Database Tables (12 Core Tables)
+## 2. Relational Database Tables (14 Core Tables)
 
-1. **`vaults`**: Daftar sumber dana (`BCA`, `NOBU`, `MANDIRI`, `JAGO`, `GOPAY`, `SPAY`, `DANA`, `CASH`, `COIN`, `TASPEN`, serta akun kewajiban seperti `SPAYLATER`).
-   - Mendukung presisi desimal sen (`Decimal(18,2)`), flag `has_sub_containers` (untuk `CASH`: Dompet D1/D2), dan `has_denominations` (untuk `COIN`: keping 1000, 500, 200, 100).
-2. **`vault_sub_containers`**: Menyimpan sub-dompet fisik (seperti `D1` dan `D2` pada `CASH`) untuk mempermudah cek fisik tanpa memecah rekening utama di buku besar.
+1. **`vaults`**: Daftar sumber dana (`BCA`, `NOBU`, `MANDIRI`, `JAGO`, `GOPAY`, `SPAY`, `DANA`, `CASH`, `COIN`, `TASPEN`, serta akun kewajiban seperti `SPAYLATER`, maupun Vault baru buatan user).
+   - Mendukung presisi desimal sen (`Decimal(18,2)`), flag `has_sub_containers`, `has_denominations` (untuk `COIN`: keping 1000, 500, 200, 100), konfigurasi profil (`symbol_mode`: `INITIALS` | `ICON` | `IMAGE`, `icon_name`, `profile_image_url` via `/api/media/vaults/...`, `color_hex`), serta status sekat (`sub_vault_out_of_sync`, `sub_vault_sync_note`).
+2. **`vault_sub_containers`**: Menyimpan sub-vault / kantong untuk Vault apa pun (`D1`/`D2` pada `CASH`, sub-vault bebas nama di bank/dompet, maupun sub-vault valas seperti `USD`/`SGD`/`EUR`).
+   - Menyimpan `currency` (default `IDR`), `is_default` (fallback routing otomatis bila user tidak memilih sub-vault), `current_balance`, `last_counted_balance`, `is_synced`, `color_hex`, dan `sort_order`.
 3. **`parties`**: Menyimpan subjek/peran transaksi (`ISA` sebagai `SELF`, `IBRAHIM` / Dada, `FERNANDO` / Nando, `SLAMET` / Amet, `DDV`, `TASPEN`, `SHOPEE_PAYLATER`).
-   - Menyimpan cache `net_receivable_balance` dan `held_fund_balance` (dana hak tertahan).
+   - Menyimpan cache `receivable_balance`, `payable_balance`, `net_receivable_balance`, `held_fund_balance`, serta flag `is_debt_contact` (`true` hanya untuk kontak sub-ledger `/debts` atau yang memiliki histori utang/piutang).
 4. **`categories`**: Master kategori beserta mapping default Layer 1, Layer 2, dan kode akun akuntansi (`coa_code`).
-5. **`action_cards`**: Template kartu input cepat tanpa OCR/AI. Menyimpan `default_vault_id`, `default_amount`, `quick_amounts_json`, `one_tap_submit`, dan `expected_cadence`.
+5. **`action_cards`**: Template kartu input cepat tanpa OCR/AI. Menyimpan `default_vault_id`, `default_sub_container_id`, `target_vault_id`, `target_sub_container_id`, `default_amount`, `quick_amounts_json`, `one_tap_submit`, `pin_priority`, dan `expected_cadence`.
 6. **`card_habit_stats`**: Profil statistik penggunaan per Card (`hour_counts_json` [24 slot], `dow_counts_json` [7 slot], `avg_interval_days`, `std_interval_days`, `last_used_timestamp`).
 7. **`vault_checkpoints`**: Sesi pencatatan `Dana Awal` dan audit/cek fisik berkala.
    - Menyimpan `original_counted_amount`, `retroactive_deduction_total` (total potongan dari transaksi lama yang baru diingat), `effective_anchor_amount`, `system_book_balance_before`, `raw_discrepancy_amount`, `resolved_discrepancy_amount`, dan `unexplained_discrepancy_amount`.
 8. **`checkpoint_denominations`**: Rincian perhitungan keping koin (`1000`, `500`, `200`, `100`) dan sub-dompet (`D1`, `D2`) saat sesi checkpoint.
 9. **`transactions`**: Header buku besar.
-   - Menyimpan `created_at` (waktu input sebenarnya), `transaction_date`, `transaction_time`, `title`, `nature`, `category_id`, `commitment_type`, `priority_tier`, `party_id`, `action_card_id`, `gross_amount`, `consume_amount`, `income_amount`, `is_backdated`, `linked_checkpoint_id`, dan `parent_transaction_id` (untuk relasi transaksi utama dengan baris Pajak/Admin yang di-split otomatis).
-10. **`transaction_legs`**: Baris mutasi masuk (`debit_in`) dan keluar (`credit_out`) per penyimpanan (`vault_id`), lengkap dengan `running_vault_balance` dan `running_total_wealth`.
+   - Menyimpan `created_at` (waktu input sebenarnya), `transaction_date`, `transaction_time`, `title`, `nature`, `category_id`, `commitment_type`, `priority_tier`, `party_id`, `action_card_id`, snapshot mata uang (`currency`, `original_gross_amount`, `fx_rate_applied`), `gross_amount`, `consume_amount`, `income_amount`, `is_backdated`, `sub_vault_warning`, `linked_checkpoint_id`, dan `parent_transaction_id` (untuk relasi transaksi utama dengan baris Pajak/Admin yang di-split otomatis).
+10. **`transaction_legs`**: Baris mutasi masuk (`debit_in`) dan keluar (`credit_out`) per penyimpanan (`vault_id` dan opsional `sub_container_id`), lengkap dengan `currency`, `fx_rate_applied`, `original_mutation`, `running_vault_balance`, dan `running_total_wealth`.
 11. **`debt_ledger_entries`**: Sub-buku besar untuk melacak piutang teman (`RECEIVABLE`), utang pribadi/PayLater (`PAYABLE`), dan dana hak tertahan (`HELD_RIGHT` seperti kasus Taspen/Dada), lengkap dengan metode penyelesaian (`CASH_OR_BANK`, `OFFSET_DEDUCTION`, `WRITEOFF_FORGIVEN`).
 12. **`pending_reminders`**: Antrean pengingat/draft ringan di bagian atas layar (misal *"Tanya Nando kopi berapa"* atau *"Tagihan SPayLater tgl 5"*) sebelum dikonversi menjadi transaksi penuh.
+13. **`app_settings`**: Pengaturan aplikasi singleton (`id = 1`) untuk `base_currency` (default `IDR`), `fx_sync_interval_days` (default `3`), `last_fx_synced_at`, `last_fx_status`, `last_fx_error`, dan `dismissed_card_suggestions_json` (daftar pasangan `nature::title` yang di-mute dari pop-up saran card).
+14. **`exchange_rate_cache`**: Cache kurs valas lokal (`base_currency` -> `quote_currency`, `rate`, `rate_date`, `source`, `fetched_at`) yang disinkronisasi berkala dari `https://api.frankfurter.dev/v2/`.
 
 ---
 

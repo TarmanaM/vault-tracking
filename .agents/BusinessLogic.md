@@ -19,8 +19,15 @@ $$\text{Score}(\text{Card}) = (0.35 \times S_{\text{hour}}) + (0.20 \times S_{\t
    - Menggunakan kurva kedekatan terhadap rata-rata jeda hari `avg_interval_days`:
      $$S_{\text{interval}} = \exp\left(-\frac{(\Delta_{\text{days}} - \mu_{\text{interval}})^2}{2\sigma^2}\right)$$
    - *Contoh*: **Isi Bensin Skupi** yang rata-rata dibeli tiap 5–7 hari sekali akan memiliki skor rendah di hari ke-1 s/d ke-3, lalu otomatis naik ke urutan teratas ketika memasuki hari ke-5 s/d ke-7.
-4. **Anti-Spam Cooldown Penalty ($P_{\text{cooldown}}$)**:
-   - Jika Card bertipe harian (`DAILY_WORKDAY`) sudah diinput hari ini, berikan penalti skor agar Card tersebut turun dan digantikan oleh kebutuhan berikutnya yang belum diinput.
+4. **Anti-Spam Cooldown Penalty ($P_{\text{cooldown}}$) & 24h New Card Spotlight**:
+   - Jika Card bertipe harian (`DAILY_WORKDAY`) atau `EXPENSE` sudah diinput hari ini, sistem memberi penalti skor (`-0.4`) agar Card tersebut turun dan digantikan kebutuhan berikutnya yang belum diinput.
+   - **Pengecualian Spotlight 24 Jam**: Card hasil promosi dari transaksi biasa mendapat `pin_priority = 8` dan bonus skor sementara (`+25` serta bebas cooldown selama 24 jam sejak `createdAt`) agar langsung tampil di *Top 5 Recommended*, lalu otomatis meluruh ke skoring kebiasaan normal setelah 24 jam.
+5. **Promosi Transaksi ke Action Card (`Promote-to-Card`)**:
+   - Memindai histori transaksi ber-`nature` dan `title` ternormalisasi sama untuk mengisi statistik awal `CardHabitStats` (`total_uses`, `hour_counts_json`, `dow_counts_json`, `avg_interval_days`, `std_interval_days`, `most_frequent_amount`, `most_frequent_vault_id`).
+   - Demi menjaga integritas histori audit, `action_card_id` hanya ditautkan pada transaksi sumber yang dipromosikan (baris lama tetap *read-only*). Duplikasi nama+tipe memicu peringatan *Link to Existing Card* vs *Create Separate Card*.
+6. **Title Autocomplete & Save-Time Card Suggestion (`CardSuggestionModal`)**:
+   - Di modal `+ Transaction`, field **Transaction Title** ditempatkan tepat di bawah **Nature** (di atas **Amount** & **Vault**) dan menyuguhkan autocomplete gabungan `[Card]` aktif/soft-hidden serta `[History]` transaksi lama. Pemilihan autocomplete hanya mengisi Amount bila masih kosong agar nominal kustom tidak tertimpa, dan menautkan `action_card_id` otomatis bila memilih `[Card]`.
+   - Saat menyimpan transaksi ad-hoc tanpa Card: jika sudah ada Card aktif bernama+tipe sama → pop-up menawarkan **`Link to Existing Card`**; jika belum ada Card tetapi ada `>= 1` histori sebelumnya (minimal pengulangan ke-2) dan tidak di-mute → pop-up persisten menanyakan **"Do You Want to Make a Card?"** lengkap dengan alasan deterministik (jumlah kemunculan, jam rata-rata, vault & nominal tersering), serta opsi **`Don't Ask Again`** yang disimpan lintas perangkat di `app_settings.dismissed_card_suggestions_json`.
 
 ---
 
@@ -47,9 +54,11 @@ Ketika user baru ingat ada transaksi yang terjadi sebelum perhitungan Dana Awal 
 
 User sering membayar dengan uang kertas (`CASH`) lalu menerima kembalian koin (`COIN`) dan lupa kapan pastinya konversi tersebut terjadi. Sistem menyediakan 2 jalur solusi:
 
-1. **Saat Input Transaksi (Inline Split Coin Change)**:
-   - Pada pembayaran menggunakan `CASH`, tersedia opsi cepat *"Coin Change to COIN"*.
-   - Contoh: Belanja Rp 18.500 bayar pakai uang kertas Rp 20.000 -> Sistem mencatat `EXPENSE` Rp 18.500 dari `CASH` dan `TRANSFER` Rp 1.500 dari `CASH` ke `COIN` dalam satu grup transaksi.
+1. **Saat Input Transaksi Tunai (`CASH` Only — 2 Mode Koin)**:
+   - Opsi koin hanya tampil ketika sumber dana `EXPENSE` adalah Physical `CASH`.
+   - **Cash + Coin Split Payment (`coinUsedAmount`)**: Contoh makan Rp 45.300 dibayar kertas Rp 44.000 (`CASH`) + koin Rp 1.300 (`COIN`) -> `CASH` berkurang `gross - coinUsed` (`-44.000`, `PRIMARY`), `COIN` berkurang `-coinUsed` (`-1.300`, `COIN_SPLIT`), `Consume = -45.300`.
+   - **Got Coin Change (`coinChangeAmount`)**: Contoh harga Rp 47.400, bayar kertas Rp 50.000, kembali kertas Rp 2.000 + koin Rp 600 -> `CASH` berkurang `gross + coinChange` (`-48.000`, `PRIMARY`), `COIN` bertambah `+coinChange` (`+600`, `COIN_CHANGE`), `Consume = -47.400`.
+   - **Dynamic Default Vault**: Action Card memakai vault tersering pada card tersebut -> `card.defaultVaultId` -> vault tersering bulan ini -> `CASH`; sedangkan `Custom Transaction` kosong memakai vault tersering bulan ini -> `CASH`.
 2. **Saat Cek Fisik (Auto Cross-Vault Offset antara Cash & Coin)**:
    - Saat user menghitung fisik `CASH` (terbagi atas sub-dompet `D1` dan `D2`) serta kepingan `COIN` (`1000`, `500`, `200`, `100`):
    - Jika `CASH` mengalami selisih kurang (misal `-Rp 11.000`) dan `COIN` mengalami selisih lebih (`+Rp 11.000`), sistem otomatis mendeteksi pergeseran tersebut dan menawarkan 1-klik **Convert Cash Shortage to Coin Change (`TRANSFER`)** sehingga tidak dianggap sebagai uang hilang.
@@ -85,4 +94,24 @@ User sering membayar dengan uang kertas (`CASH`) lalu menerima kembalian koin (`
 
 - Jika terjadi batal transaksi (refund) atau koreksi diskon, user langsung **mengedit nominal atau menghapus baris transaksi aslinya**.
 - Setiap kali ada edit/hapus atau penyisipan transaksi backdated, sistem otomatis menjalankan fungsi rekalkulasi saldo berjalan (`running_vault_balance` dan `running_total_wealth`) secara berurutan berdasarkan `(transaction_date, transaction_time, id)`.
+
+---
+
+## 7. Dynamic Sub-Vaults, Unallocated Pool & Multi-Currency FX Valuation (`Backlog 03`)
+
+1. **Mandatory Default Sub-Vault Routing**:
+   - Setiap Vault yang memiliki `VaultSubContainer` wajib memiliki tepat satu pocket dengan `isDefault = true`.
+   - Action Card maupun input transaksi yang tidak menentukan Sub-Vault secara otomatis diarahkan ke Default Sub-Vault milik Vault tersebut.
+2. **Sync Split Non-Mutating & Aturan Auto-Fill vs Unallocated Pool**:
+   - Menyimpan alokasi *Sync Split* pada Sub-Vault base currency hanya memperbarui `vault_sub_containers` dan **tidak mengubah** saldo utama `vaults.current_balance`.
+   - Jika setelah sinkronisasi pocket base currency tersisa **tepat 1** pocket base currency lain yang belum disync, pocket tersebut otomatis terisi sebesar `Main Vault - Synced Sum` (`AUTO_DERIVED`, `isSynced = true`).
+   - Jika tersisa **>= 2** pocket base currency unsynced, tidak ada yang diisi otomatis; selisih tersisa tetap berada di **Unallocated Pool** (`Main Vault - Synced Sum`).
+3. **Rule 16 Spillover Bypass & Reversal**:
+   - Pengeluaran melebihi *Unallocated Pool* atau mendebit pocket tersinkronisasi hingga `< 0` tidak pernah diblokir; transaksi tetap tercatat dengan menandai `vaults.sub_vault_out_of_sync = true`, mengisi `sub_vault_sync_note`, dan menandai `transactions.sub_vault_warning = true`.
+   - Undo / penghapusan transaksi (`deleteAndReverseTransaction`) membalik mutasi `vault_sub_containers.current_balance` dan mengevaluasi ulang status sinkronisasi sehingga flag warning otomatis bersih kembali jika saldo kembali sinkron.
+4. **Multi-Currency Valas (Frankfurter v2 Active-Only Cache + Historical Rate Lock)**:
+   - Pocket Valas menyimpan saldo asli di mata uang masing-masing (`currency != baseCurrency`) tanpa mencemari `vaults.current_balance` yang berbasiskan `baseCurrency`.
+   - Mekanisme sync Frankfurter v2 bersikap **strict active-only**: sistem hanya melakukan request ke endpoint publik untuk mata uang asing yang aktif digunakan pada `vault_sub_containers` milik Vault aktif (`isActive = true`). Jika user tidak memiliki pocket valas aktif, auto-sync maupun tombol **Sync Now** dinonaktifkan sepenuhnya (`0` request eksternal); cache historis/manual yang sudah tidak dipakai tetap disimpan secara pasif tanpa di-poll lagi.
+   - Saat transaksi dicatat dalam Valas, nilai `fxRateApplied` dikunci permanen (`transactions.grossAmount` & `consumeAmount` di Base Currency bersifat immutable), sedangkan estimasi kekayaan live di Dashboard & `/analytics` menghitung *mark-to-market* dari `ExchangeRateCache` lokal.
+
 

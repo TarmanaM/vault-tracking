@@ -1,0 +1,84 @@
+ini chart garis yang aku inginkan atau fitur yang aku inginkan 
+
+# 1
+1.png
+adalah chart yang menunjukkan konsumsi ku per hari , sehingga aku bisa memantau pengeluaran ku per hari apakah makin besar atau tidak
+
+# 2
+2.png
+adalah bar chart yang menurun yang menunjukkan total per bulannya apakah semakin rendah pengeluaranku
+
+# 3
+3.png
+adalah transaksi yang paling besar consumtif ku . jadi aku bisa lihat transaksi konsumtif apa yang paling besar
+
+#4
+4.png
+adalah chart yg seperti saham,kalau naik berarti uang masuk, kalau turun berarti uang keluar. dengan begitu aku tau perjalanan keuanganku.
+
+# 5
+pada Wealth Trajectory Timeline (Stock-Like Chart) yang sekarang ada aku ingin dia line aja gak fill biar lebih clean. 
+
+# 6
+aku juga perlu mengetahui frequensi penyimpanan mana yang sering dipakai
+
+#7 
+mungkin perlu ada penyederhanaan angka kalau terlalu banyak angkanya. seperti 1.000.000 menjadi 1jt, 59.500 menjadi 59.5k , dst . namun ada action button juga dimana bisa menunjukan exact valuenya2   
+
+# 8 
+mungkin ada fitur yang bisa hide total uang agar aku bisa tunjukan ke orang lain seperti apa app tanpa membocorkan nilai uang ku. dengan defaut unhide
+
+# 9 
+field input uang otomatis memecahkan uang. misal aku mengetik 1000000 maka otomatis terpecah menjadi 1.000.000 .
+
+# 10
+saat bikin record transaksi kenapa tidak ada input tanggal ? mungkin ada tombol now yang langsung isi sesuai datetime sekarang.
+
+# 11 
+selain recomended smart action. ada juga fitur filter dan select , sehingga user bisa lihat transaksi yang sama walau tidak rekomended
+
+# 12
+di quick action sepertinya ledger di hilangkan saja 
+
+# 13
+uang hilang atau tidak tercatat jangan terlalu terlihat parah, cukup seperti warn saja
+
+# 14 
+mungkin notif jangan pake native alert js. coba pakai notistack
+
+# 15
+saat record custom pada retroactive kayanya jangan jadi checkbox tapi otomatis jika transaksi tanggal sebelum checkpoint terakhir maka langsung ada tulisan retroactive 
+
+# 16 
+di smart Action mungkin tambahkan untuk manual uangnya
+
+# 17
+di fitur hutang yg kulihat adalah tombol berikan hutang dan orang yang berhutang membayarnya. aku tidak lihat kalau aku yang berhutang ke orang tersebut dan aku membayar hutang ku. serta membuat satu kanal ke orang baru aku berhutang atau orang tersebut meminjam uang ke aku. transaksi mungkin sama kaya new record transaksi jadi kalau aku berhutang aku beli apa dan itu hutang ke orang tersebut. lalu aku bayar hutang berikan keterangan apakah aku bayar hutang yang mana sesuai record aku berhutang atau aku masukan uang tanpa melihat transaksi aku berhutang sehingga aku bisa masukan keterangan " aku totalin segini dulu" . lalu untuk vaultnya berarti aku bayar lewat vault dia "jadi mungkin ada bank yang tidak ada di vault ku".
+
+
+# 18 
+di card smart actions gak ada tombol x atau cancel , jadi value nya gak bisa di reset, bikin user ambigu.
+
+#19 
+di sepertinya ada page perlu ada sync ? sebab jika aku masukan audit this vault valuenya tidak berubah pada page vaults.
+
+
+# 20 
+mungkin ada tombol undo saat aku menambahkan transaksi ?
+
+# 21
+aku suka ada tombol iklaskan sebuah hutang orang. namun nominal sesuai dengan transaksi yang di iklaskan. aku ingin ada yang manual uang juga.
+
+# 22 
+aku perlu page detail utang piutang aku dan orang tersebut beserta transaksinya. didalamnya juga ada tombol iklaskan juga dan manual iklaskan . 
+
+# 22-2 lalu misal si A punya hutang ke aku 30k. lalu aku ingin membeli sesuatu (kategori tetap seperti aku membeli jajan atau apalah pada transaksinya) tapi di talangin oleh si A 45k (artinya aku berhutang ke A). maka jangan otomatus hutang si A berkurang, tapi manual . tapi tetap si A piutang 30k aku berhutang 45k. namun ada fitur juga untuk merge kedua transaksi itu sehingga si A piutang 0 tapi aku berhutang 15k.
+
+#  23
+pada smart action juga ada fitur hide. jadi mungkin aku tidak lagi dapet gaji dari DDV tapi dari kantor lain, namun smart action masih memunculkannya. untuk hide ada 2 tipe, yang pertama hide biasa, jadi di smart tidak ada, namun di filter search smart action muncul. lalu ada hide lebih yang tidak ada di filter search maupun recomended smart action.
+
+# 24
+di journet pada current net wealth ada sebuah penanda kalau nilainya naik dari bulan sebelumnya atau turun dengan persen juga dan icon.
+# xx
+mungkin di journey ada filter range tanggal. default 3 bulan terakhir dan ledger
+

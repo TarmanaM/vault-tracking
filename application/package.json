@@ -4,9 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "next build",
+    "dev-pubs": "ipconfig | findstr /i \"ipv4\" & next dev --hostname 0.0.0.0 --port 3000 --turbopack",
+    "prod-pubs": "ipconfig | findstr /i \"ipv4\" & next build && next start --hostname 0.0.0.0 --port 3000",
+    "pubs": "next start --hostname 0.0.0.0 --port 3000",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "inject-excel": "node prisma/inject-excel.js"
   },
   "dependencies": {
     "@emotion/cache": "^11.14.0",
@@ -16,9 +20,11 @@
     "@mui/material": "^7.3.11",
     "@mui/material-nextjs": "^9.5.0",
     "@mui/x-charts": "^9.18.0",
+    "@mui/x-date-pickers": "^9.18.0",
     "@prisma/client": "^6.19.3",
     "@tanstack/react-query": "^5.107.1",
     "bcryptjs": "^3.0.3",
+    "dayjs": "^1.11.23",
     "decimal.js": "^10.6.0",
     "jsonwebtoken": "^9.0.3",
     "next": "15.5.29",
@@ -31,5 +37,8 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.29",
     "prisma": "^6.19.3"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   }
 }

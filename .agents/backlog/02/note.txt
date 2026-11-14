@@ -1,0 +1,49 @@
+#1
+pada cards transaction aku suka kalau field custom amout di sembunyikan dan ada tombol chip untuk memunculkannya  di akhir chip-chip rekomendasi amount itu.
+
+#2 
+di journey pada vault itu ada pie chart currentWealtDistribution. dibawah itu ada list vault mana yang sering dipakai dari terbanyak seperti di gambar 01.png
+
+#3
+di journey mungkin urutannya\
+- net toal wealth, open recievables, paylables, liqueid
+- cash flow waterfall
+- daily consumtion, month consumtion
+- big number mandatory, esential, discretionary, social charity
+- baru chart pada #2
+
+#4 
+berarti pada transaction atau card kalau tidak memilih bank atau vault default cash ?. sepertinya field coin hanya pada cash saja?? dan penggunaannya berarti jika aku bayar makan 45.300, lalu aku pegang uang 20.000 x2, 2.000 x2 , 500(coint) x2, 100(coin), 200(coint). jadi 44.000 amount lalu coin 1.300 ?
+
+#5
+pada Quick Action Storage Vault mungkin card urutannya dari yang terbesar vaultnya
+
+#6 pada Smart Action card untuk recomended mungkin tampilkan 5 dulu baru nanti ada +5 more
+
+#7
+urutan quic Action
+- total net wealth
+- monthly consumtion
+- smart card
+- baru storage vault
+
+#8 
+btw pada fitur debt kanal debt itu tidak mengikuti sesuai pada kontak transaksi biasakan ? misal seperti aku mendapatkan hadiah THR dari si B, berarti aku buat record transaction Pemasukan?, title="dapet thr", pemasukan="dompet cash" party= B ? kahh ?. dan nanti malah ada kanal si B di debt padahal aku gak ada utang piutang . kecuali di kemudian hari aku mulai ada hutang piutang dengan menambah +add contact.
+
+
+#9
+pada smart action baik recomendation atau all cards itu dua kolom (untuk layar yg lebar, kalau di hp satu kolom saja) ?, jika judul terlalu panjang mungkin ada action ... untuk dihide . lalu saat di klik nanti tulisan pangjang di keluarkan. tapi tulisan panjangnya tidak melebarkan card ya. buat dia wrap tulisannya
+
+#10
+pada vault checkpoint sepertinya  recent audit di hide dulu dan ada tombol seperti look baru tampilkan record recent auditnya
+
+
+#11 
+aku sudah host webnya di rund dev-pubs, jadi kamu coba buka ui di browser, lalu cek apakah tampilan sudah oke di berbagai device, apakah masih ada yang tertimpa atau kesempitan, atau bagian summary (contoh pada menu debs di card total recievables total payables) itu mungkin bisa dibuat satu baris agar tidak memanjang kebawah dan membuat user harus scroll terus kebawah. lalu coba cek juga apakah gap antar component card jika di hp maksense selebar itu. buat user tidak terlalu cape untuk scroll scroll yang panjang kebawah. btw hp ku Poco F7 pro.
+
+#12
+pada contack deb tolong tambahkan filter untuk mencari orang yang ingin ku cari
+
+#14
+btw apa itu file tranc di folder .next ? boleh ku hapus ?
+
