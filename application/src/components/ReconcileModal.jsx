@@ -14,11 +14,14 @@ import {
   Stack,
   Divider,
   Grid,
+  Checkbox,
+  Chip,
 } from "@mui/material";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import CurrencyTextField from "@/components/CurrencyTextField";
 import MoneyValue from "@/components/MoneyValue";
+import { getCurrencySymbol } from "@/shared/currencyHelpers";
 
 export default function ReconcileModal({ vaults = [] }) {
   const { reconcileDialog, closeReconcileDialog, enqueueToast } = useLedgerStore();
@@ -38,7 +41,15 @@ export default function ReconcileModal({ vaults = [] }) {
   const [coin200, setCoin200] = useState("");
   const [coin100, setCoin100] = useState("");
 
+  // Per-pocket audit state for vaults with custom pockets
+  const [checkedPockets, setCheckedPockets] = useState({});
+  const [pocketValues, setPocketValues] = useState({});
+
   const activeVault = vaults.find((v) => v.id === parseInt(selectedVaultId, 10));
+  const hasCustomPockets =
+    Boolean(activeVault?.subContainers?.length) &&
+    activeVault?.code !== "CASH" &&
+    activeVault?.code !== "COIN";
 
   useEffect(() => {
     if (reconcileDialog.open) {
@@ -59,7 +70,16 @@ export default function ReconcileModal({ vaults = [] }) {
     setCoin500("");
     setCoin200("");
     setCoin100("");
+    setCheckedPockets({});
+    setPocketValues({});
   };
+
+  useEffect(() => {
+    if (!reconcileDialog.open || !hasCustomPockets || !activeVault?.subContainers) return;
+    const defaultSub = activeVault.subContainers.find((s) => s.isDefault) || activeVault.subContainers[0];
+    setCheckedPockets(defaultSub ? { [defaultSub.id]: true } : {});
+    setPocketValues({});
+  }, [reconcileDialog.open, activeVault?.id, hasCustomPockets]);
 
   // Auto-calculate sum if Cash sub-containers change
   useEffect(() => {
@@ -119,8 +139,28 @@ export default function ReconcileModal({ vaults = [] }) {
     },
   });
 
+  const selectedPocketAudits = hasCustomPockets
+    ? (activeVault?.subContainers || [])
+        .filter((sc) => checkedPockets[sc.id] && pocketValues[sc.id] !== "" && pocketValues[sc.id] !== undefined)
+        .map((sc) => ({
+          subContainerId: sc.id,
+          actualCountedAmount: Number(pocketValues[sc.id]) || 0,
+        }))
+    : [];
+
   const handleSubmit = () => {
     if (!activeVault) return;
+
+    if (hasCustomPockets) {
+      if (selectedPocketAudits.length === 0) return;
+      reconcileMutation.mutate({
+        vaultId: activeVault.id,
+        checkpointType,
+        pocketAudits: selectedPocketAudits,
+      });
+      return;
+    }
+
     const counted = Number(actualBalanceInput) || 0;
     const denominations = [];
     const subContainers = [];
@@ -260,62 +300,167 @@ export default function ReconcileModal({ vaults = [] }) {
             </Box>
           )}
 
-          {/* Total Physical Count Input */}
-          <CurrencyTextField
-            label="Total Actual Physical Balance"
-            value={actualBalanceInput}
-            onValueChange={(num) => setActualBalanceInput(num)}
-            required
-            showClear
-            size="medium"
-          />
-
-          {/* Discrepancy Preview Card */}
-          <Box sx={{ bgcolor: "#F1F5F9", p: 2, borderRadius: 2 }}>
-            <Stack spacing={0.5}>
-              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                <Typography variant="body2" color="text.secondary">
-                  System Book Balance:
+          {/* Per-Pocket Audit for Vaults with Pockets */}
+          {hasCustomPockets ? (
+            <Box sx={{ bgcolor: "#F8FAFC", p: 2, borderRadius: 2, border: "1px solid #E2E8F0" }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                  Select Pockets to Audit:
                 </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  <MoneyValue value={bookNum} includeCents allowTapToggle />
-                </Typography>
-              </Box>
-              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                <Typography variant="body2" color="text.secondary">
-                  Physical Counted:
-                </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  <MoneyValue value={countedNum} includeCents allowTapToggle />
-                </Typography>
-              </Box>
-              <Divider sx={{ my: 0.5 }} />
-              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  Calculated Discrepancy:
-                </Typography>
-                <Typography
-                  variant="body2"
-                  sx={{
-                    fontWeight: 800,
-                    color: diffNum < 0 ? "#D97706" : diffNum > 0 ? "#10B981" : "#0F172A",
+                <Button
+                  size="small"
+                  onClick={() => {
+                    const allChecked = activeVault.subContainers.every((sc) => checkedPockets[sc.id]);
+                    const next = {};
+                    if (!allChecked) {
+                      for (const sc of activeVault.subContainers) next[sc.id] = true;
+                    }
+                    setCheckedPockets(next);
                   }}
+                  sx={{ textTransform: "none", fontWeight: 700 }}
                 >
-                  {diffNum < 0 ? (
-                    <>
-                      <MoneyValue value={diffNum} includeCents /> (Shortage / Belum Tercatat)
-                    </>
-                  ) : diffNum > 0 ? (
-                    <>
-                      +<MoneyValue value={diffNum} includeCents /> (Interest / Surplus)
-                    </>
-                  ) : (
-                    "Rp 0 (100% Synced)"
-                  )}
-                </Typography>
+                  {activeVault.subContainers.every((sc) => checkedPockets[sc.id])
+                    ? "Unselect All"
+                    : "Select All"}
+                </Button>
+              </Stack>
+
+              <Stack spacing={1.5}>
+                {activeVault.subContainers.map((sc) => {
+                  const isChecked = Boolean(checkedPockets[sc.id]);
+                  const ccy = String(sc.currency || "IDR").toUpperCase();
+                  const val = pocketValues[sc.id];
+                  const hasVal = val !== "" && val !== undefined;
+                  const diff = hasVal ? (Number(val) || 0) - (Number(sc.currentBalance) || 0) : 0;
+
+                  return (
+                    <Box
+                      key={sc.id}
+                      sx={{
+                        p: 1.25,
+                        borderRadius: 1.5,
+                        bgcolor: "#FFFFFF",
+                        border: isChecked ? "1.5px solid #2563EB" : "1px solid #E2E8F0",
+                      }}
+                    >
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: isChecked ? 1 : 0 }}>
+                        <Stack direction="row" alignItems="center" spacing={0.75}>
+                          <Checkbox
+                            size="small"
+                            checked={isChecked}
+                            onChange={(e) =>
+                              setCheckedPockets((prev) => ({
+                                ...prev,
+                                [sc.id]: e.target.checked,
+                              }))
+                            }
+                            sx={{ p: 0.25 }}
+                          />
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                            {sc.name}
+                          </Typography>
+                          <Chip label={ccy} size="small" sx={{ height: 20, fontSize: "0.7rem", fontWeight: 700 }} />
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary">
+                          Book: <MoneyValue value={sc.currentBalance} currency={ccy} forceExact />
+                        </Typography>
+                      </Stack>
+
+                      {isChecked && (
+                        <Box>
+                          <CurrencyTextField
+                            label={`Actual Counted (${ccy})`}
+                            currencySymbol={getCurrencySymbol(ccy)}
+                            value={val ?? ""}
+                            onValueChange={(num) =>
+                              setPocketValues((prev) => ({
+                                ...prev,
+                                [sc.id]: num,
+                              }))
+                            }
+                            showClear
+                          />
+                          {hasVal && (
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                display: "block",
+                                mt: 0.5,
+                                fontWeight: 700,
+                                color: diff < 0 ? "#D97706" : diff > 0 ? "#10B981" : "#64748B",
+                              }}
+                            >
+                              Discrepancy: {diff > 0 ? "+" : ""}
+                              <MoneyValue value={diff} currency={ccy} forceExact />
+                            </Typography>
+                          )}
+                        </Box>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </Box>
+          ) : (
+            <>
+              {/* Total Physical Count Input */}
+              <CurrencyTextField
+                label="Total Actual Physical Balance"
+                value={actualBalanceInput}
+                onValueChange={(num) => setActualBalanceInput(num)}
+                required
+                showClear
+                size="medium"
+              />
+
+              {/* Discrepancy Preview Card */}
+              <Box sx={{ bgcolor: "#F1F5F9", p: 2, borderRadius: 2 }}>
+                <Stack spacing={0.5}>
+                  <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                    <Typography variant="body2" color="text.secondary">
+                      System Book Balance:
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      <MoneyValue value={bookNum} includeCents allowTapToggle />
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Physical Counted:
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      <MoneyValue value={countedNum} includeCents allowTapToggle />
+                    </Typography>
+                  </Box>
+                  <Divider sx={{ my: 0.5 }} />
+                  <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      Calculated Discrepancy:
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontWeight: 800,
+                        color: diffNum < 0 ? "#D97706" : diffNum > 0 ? "#10B981" : "#0F172A",
+                      }}
+                    >
+                      {diffNum < 0 ? (
+                        <>
+                          <MoneyValue value={diffNum} includeCents /> (Shortage / Belum Tercatat)
+                        </>
+                      ) : diffNum > 0 ? (
+                        <>
+                          +<MoneyValue value={diffNum} includeCents /> (Interest / Surplus)
+                        </>
+                      ) : (
+                        "Rp 0 (100% Synced)"
+                      )}
+                    </Typography>
+                  </Box>
+                </Stack>
               </Box>
-            </Stack>
-          </Box>
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ p: 2 }}>
@@ -325,7 +470,10 @@ export default function ReconcileModal({ vaults = [] }) {
         <Button
           onClick={handleSubmit}
           variant="contained"
-          disabled={reconcileMutation.isPending || actualBalanceInput === ""}
+          disabled={
+            reconcileMutation.isPending ||
+            (hasCustomPockets ? selectedPocketAudits.length === 0 : actualBalanceInput === "")
+          }
         >
           {reconcileMutation.isPending ? "Syncing..." : "Confirm & Sync Balance"}
         </Button>

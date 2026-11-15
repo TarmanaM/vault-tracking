@@ -58,6 +58,7 @@ export default function SubVaultSyncModal({ vaults = [], baseCurrency = "IDR", e
   const [newName, setNewName] = useState("");
   const [newCurrency, setNewCurrency] = useState(baseCurrency);
   const [newInitBal, setNewInitBal] = useState("");
+  const [adjustMainVault, setAdjustMainVault] = useState(false);
   const [infoAnchor, setInfoAnchor] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -81,6 +82,7 @@ export default function SubVaultSyncModal({ vaults = [], baseCurrency = "IDR", e
     setNewName("");
     setNewCurrency(baseCurrency);
     setNewInitBal("");
+    setAdjustMainVault(false);
   }, [subVaultSyncDialog.open, vault, baseCurrency]);
 
   const baseUpper = String(baseCurrency || "IDR").toUpperCase();
@@ -149,6 +151,7 @@ export default function SubVaultSyncModal({ vaults = [], baseCurrency = "IDR", e
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           defaultSubContainerId: defaultSubId,
+          adjustMainVaultToMatch: preview.isNegativeDrift && adjustMainVault,
           allocations: allocations.map((a) => ({
             id: a.id,
             name: a.name,
@@ -288,10 +291,32 @@ export default function SubVaultSyncModal({ vaults = [], baseCurrency = "IDR", e
           </Stack>
 
           {preview.isNegativeDrift && (
-            <Typography variant="caption" color="error.main" sx={{ fontWeight: 700, display: "block", mt: 0.5 }}>
-              Synced splits exceed Main Vault balance by {Math.abs(preview.remainder).toLocaleString()} {baseUpper}.
-              Saving is still allowed and flags an Out-of-Sync reminder.
-            </Typography>
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, display: "block", mb: 0.75 }}>
+                Synced {baseUpper} pockets ({preview.syncedSum.toLocaleString()}) exceed Main Vault ({mainBookBalance.toLocaleString()}) by{" "}
+                {Math.abs(preview.remainder).toLocaleString()} {baseUpper}.
+              </Typography>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                <Button
+                  size="small"
+                  variant={adjustMainVault ? "contained" : "outlined"}
+                  color="primary"
+                  onClick={() => setAdjustMainVault(true)}
+                  sx={{ textTransform: "none", fontWeight: 700 }}
+                >
+                  Adjust Main Vault to {preview.syncedSum.toLocaleString()} (+Initial Fund)
+                </Button>
+                <Button
+                  size="small"
+                  variant={!adjustMainVault ? "contained" : "outlined"}
+                  color="warning"
+                  onClick={() => setAdjustMainVault(false)}
+                  sx={{ textTransform: "none", fontWeight: 700 }}
+                >
+                  Keep Main Vault ({mainBookBalance.toLocaleString()}) &amp; Flag Out-of-Sync
+                </Button>
+              </Stack>
+            </Alert>
           )}
         </Box>
 

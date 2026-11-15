@@ -177,7 +177,7 @@ export default function WealthDistributionAndTimelineSection({
                       openInfo(
                         e,
                         "Wealth Trajectory Timeline",
-                        "Chronological curve of total Net Wealth (Liquid Vaults + Receivables - Payables) across the selected date range."
+                        "Chronological curve of Net Wealth. 'Book / Locked Basis' reflects transaction-time FX rates; 'Mark-to-Market (Live FX)' reflects daily FX rate movements even on days without transactions."
                       )
                     }
                   >
@@ -200,8 +200,8 @@ export default function WealthDistributionAndTimelineSection({
                     }}
                     series={[
                       {
-                        id: "net-wealth",
-                        label: "Net Wealth",
+                        id: "book-wealth",
+                        label: "Book / Locked Basis",
                         data: wealthTimeline.map((p) => p.wealth),
                         color: "#2563EB",
                         area: false,
@@ -209,6 +209,24 @@ export default function WealthDistributionAndTimelineSection({
                         showMark: showWealthLabels,
                         valueFormatter: moneyTooltipFormatter,
                       },
+                      ...(wealthTimeline.some(
+                        (p) =>
+                          p.marketWealth !== undefined &&
+                          Math.abs(p.marketWealth - p.wealth) > 0.01
+                      )
+                        ? [
+                            {
+                              id: "market-wealth",
+                              label: "Mark-to-Market (Live FX)",
+                              data: wealthTimeline.map((p) => p.marketWealth ?? p.wealth),
+                              color: "#10B981",
+                              area: false,
+                              shape: "diamond",
+                              showMark: showWealthLabels,
+                              valueFormatter: moneyTooltipFormatter,
+                            },
+                          ]
+                        : []),
                     ]}
                     height={235}
                   />

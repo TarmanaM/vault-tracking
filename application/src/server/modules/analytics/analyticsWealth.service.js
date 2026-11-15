@@ -38,16 +38,22 @@ export async function getWealthJourneyAnalytics(userId, { preset = "3M", startDa
   const baseCurrency = String(appSettings.baseCurrency || "IDR").toUpperCase();
   const rateMap = await getCachedRateMap(baseCurrency);
 
-  const allTxs = await prisma.transaction.findMany({
-    where: { userId },
-    include: {
-      legs: { include: { vault: true } },
-      debtLedgerEntries: true,
-      category: true,
-      party: true,
-    },
-    orderBy: [{ transactionDate: "asc" }, { transactionTime: "asc" }, { id: "asc" }],
-  });
+  const [allTxs, fxHistoryRows] = await Promise.all([
+    prisma.transaction.findMany({
+      where: { userId },
+      include: {
+        legs: { include: { vault: true } },
+        debtLedgerEntries: true,
+        category: true,
+        party: true,
+      },
+      orderBy: [{ transactionDate: "asc" }, { transactionTime: "asc" }, { id: "asc" }],
+    }),
+    prisma.exchangeRateHistory.findMany({
+      where: { quoteCurrency: baseCurrency },
+      orderBy: [{ rateDate: "asc" }, { id: "asc" }],
+    }),
+  ]);
 
   const rawVaults = await prisma.vault.findMany({
     where: { userId, isActive: true },
@@ -90,8 +96,76 @@ export async function getWealthJourneyAnalytics(userId, { preset = "3M", startDa
     filterStart.setHours(0, 0, 0, 0);
   }
 
+  const fxHistoryByCcy = new Map();
+  const fxSnapshotDates = new Set();
+  for (const row of fxHistoryRows) {
+    const ccy = String(row.baseCurrency || "").toUpperCase();
+    if (!fxHistoryByCcy.has(ccy)) fxHistoryByCcy.set(ccy, []);
+    fxHistoryByCcy.get(ccy).push({
+      rateDate: row.rateDate,
+      rate: toDecimal(row.rate),
+    });
+    fxSnapshotDates.add(row.rateDate);
+  }
+
+  const resolveHistoricalRate = (ccy, dateStr) => {
+    const list = fxHistoryByCcy.get(ccy);
+    if (list && list.length > 0) {
+      let chosen = null;
+      for (const entry of list) {
+        if (entry.rateDate <= dateStr) {
+          chosen = entry.rate;
+        } else {
+          break;
+        }
+      }
+      if (chosen && chosen.greaterThan(0)) return chosen;
+    }
+    const cached = rateMap[ccy];
+    if (cached && Number(cached.rate) > 0) return toDecimal(cached.rate);
+    return toDecimal(0);
+  };
+
+  // Seed unlogged initial foreign pocket balances (e.g. pockets created directly with an opening balance)
+  const currentForeignHoldings = {};
+  for (const v of vaults) {
+    for (const sc of v.subContainers || []) {
+      const ccy = String(sc.currency || baseCurrency).toUpperCase();
+      if (ccy !== baseCurrency) {
+        currentForeignHoldings[ccy] = addMoney(
+          currentForeignHoldings[ccy] || 0,
+          sc.currentBalance || 0
+        );
+      }
+    }
+  }
+  const txForeignNet = {};
+  for (const tx of allTxs) {
+    for (const leg of tx.legs) {
+      const legCcy = String(leg.currency || baseCurrency).toUpperCase();
+      if (legCcy !== baseCurrency) {
+        txForeignNet[legCcy] = addMoney(txForeignNet[legCcy] || 0, leg.originalMutation || 0);
+      }
+    }
+  }
+
   const vaultState = {};
   for (const v of vaults) vaultState[v.id] = toDecimal(0);
+  const foreignHoldings = {};
+  let foreignLockedBase = toDecimal(0);
+  for (const [ccy, totalBal] of Object.entries(currentForeignHoldings)) {
+    const unlogged = subMoney(totalBal, txForeignNet[ccy] || 0);
+    if (!unlogged.isZero()) {
+      foreignHoldings[ccy] = unlogged;
+      const firstDate =
+        allTxs.length > 0
+          ? allTxs[0].transactionDate.toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0];
+      const initRate = resolveHistoricalRate(ccy, firstDate);
+      foreignLockedBase = addMoney(foreignLockedBase, roundMoney(unlogged.times(initRate)));
+    }
+  }
+
   let runningNetRec = toDecimal(0);
   let runningNetPay = toDecimal(0);
 
@@ -99,34 +173,87 @@ export async function getWealthJourneyAnalytics(userId, { preset = "3M", startDa
   const monthEndWealth = new Map();
   let initialAnchorTotalWealth = null;
 
+  const txsByDate = new Map();
   for (const tx of allTxs) {
     const txDateStr = tx.transactionDate.toISOString().split("T")[0];
-    const ym = txDateStr.slice(0, 7);
+    if (!txsByDate.has(txDateStr)) txsByDate.set(txDateStr, []);
+    txsByDate.get(txDateStr).push(tx);
+  }
 
-    for (const leg of tx.legs) {
-      vaultState[leg.vaultId] = addMoney(vaultState[leg.vaultId] || 0, leg.netMutation);
+  const firstTxDateStr =
+    allTxs.length > 0 ? allTxs[0].transactionDate.toISOString().split("T")[0] : null;
+  const allTimelineDates = new Set(txsByDate.keys());
+  if (firstTxDateStr) {
+    for (const snapDate of fxSnapshotDates) {
+      if (snapDate >= firstTxDateStr) {
+        allTimelineDates.add(snapDate);
+      }
     }
+  }
 
-    for (const de of tx.debtLedgerEntries) {
-      const amt = toDecimal(de.amount);
-      if (de.entryCategory === "RECEIVABLE") {
-        runningNetRec = de.direction === "INCREASE" ? addMoney(runningNetRec, amt) : subMoney(runningNetRec, amt);
-      } else if (de.entryCategory === "PAYABLE") {
-        runningNetPay = de.direction === "INCREASE" ? addMoney(runningNetPay, amt) : subMoney(runningNetPay, amt);
+  const sortedTimelineDates = Array.from(allTimelineDates).sort();
+
+  for (const dateStr of sortedTimelineDates) {
+    const dayTxs = txsByDate.get(dateStr) || [];
+    const ym = dateStr.slice(0, 7);
+
+    for (const tx of dayTxs) {
+      for (const leg of tx.legs) {
+        const legCcy = String(leg.currency || baseCurrency).toUpperCase();
+        if (legCcy !== baseCurrency) {
+          const origMut = toDecimal(leg.originalMutation || 0);
+          const legRate = toDecimal(leg.fxRateApplied || 0);
+          foreignHoldings[legCcy] = addMoney(foreignHoldings[legCcy] || 0, origMut);
+          if (legRate.greaterThan(0)) {
+            foreignLockedBase = addMoney(foreignLockedBase, roundMoney(origMut.times(legRate)));
+          }
+        } else {
+          vaultState[leg.vaultId] = addMoney(vaultState[leg.vaultId] || 0, leg.netMutation);
+        }
+      }
+
+      for (const de of tx.debtLedgerEntries) {
+        const amt = toDecimal(de.amount);
+        if (de.entryCategory === "RECEIVABLE") {
+          runningNetRec =
+            de.direction === "INCREASE"
+              ? addMoney(runningNetRec, amt)
+              : subMoney(runningNetRec, amt);
+        } else if (de.entryCategory === "PAYABLE") {
+          runningNetPay =
+            de.direction === "INCREASE"
+              ? addMoney(runningNetPay, amt)
+              : subMoney(runningNetPay, amt);
+        }
       }
     }
 
-    let liquidSum = toDecimal(0);
+    let liquidBaseSum = toDecimal(0);
     for (const vBal of Object.values(vaultState)) {
-      liquidSum = addMoney(liquidSum, vBal);
+      liquidBaseSum = addMoney(liquidBaseSum, vBal);
     }
-    const netWealthSnapshot = subMoney(addMoney(liquidSum, runningNetRec), runningNetPay).toNumber();
 
-    dailyWealthAll.set(txDateStr, netWealthSnapshot);
-    monthEndWealth.set(ym, netWealthSnapshot);
+    let foreignMarketSum = toDecimal(0);
+    for (const [ccy, qty] of Object.entries(foreignHoldings)) {
+      if (!qty.isZero()) {
+        const dayRate = resolveHistoricalRate(ccy, dateStr);
+        foreignMarketSum = addMoney(foreignMarketSum, roundMoney(qty.times(dayRate)));
+      }
+    }
 
-    if (tx.nature === "INITIAL_FUND") {
-      initialAnchorTotalWealth = netWealthSnapshot;
+    const netDebt = subMoney(runningNetRec, runningNetPay);
+    const bookWealth = roundMoney(
+      addMoney(addMoney(liquidBaseSum, foreignLockedBase), netDebt)
+    ).toNumber();
+    const marketWealth = roundMoney(
+      addMoney(addMoney(liquidBaseSum, foreignMarketSum), netDebt)
+    ).toNumber();
+
+    dailyWealthAll.set(dateStr, { wealth: bookWealth, marketWealth });
+    monthEndWealth.set(ym, marketWealth);
+
+    if (dayTxs.some((t) => t.nature === "INITIAL_FUND")) {
+      initialAnchorTotalWealth = marketWealth;
     }
   }
 
@@ -224,11 +351,15 @@ export async function getWealthJourneyAnalytics(userId, { preset = "3M", startDa
       if (filterEnd && d > filterEnd) return false;
       return true;
     })
-    .map(([date, wealth]) => ({ date, wealth }));
+    .map(([date, snap]) => ({
+      date,
+      wealth: snap.wealth,
+      marketWealth: snap.marketWealth,
+    }));
 
   if (wealthTimeline.length === 0) {
     const todayStr = new Date().toISOString().split("T")[0];
-    wealthTimeline = [{ date: todayStr, wealth: netTotalWealthNum }];
+    wealthTimeline = [{ date: todayStr, wealth: netTotalWealthNum, marketWealth: netTotalWealthNum }];
   }
 
   const dailyCashflowMap = new Map();
@@ -242,8 +373,26 @@ export async function getWealthJourneyAnalytics(userId, { preset = "3M", startDa
     }
     const bucket = dailyCashflowMap.get(dateStr);
     for (const leg of tx.legs) {
-      bucket.inflow = addMoney(bucket.inflow, leg.debitIn);
-      bucket.outflow = addMoney(bucket.outflow, leg.creditOut);
+      const legCurrency = String(leg.currency || baseCurrency).toUpperCase();
+      if (
+        legCurrency !== baseCurrency &&
+        toDecimal(leg.debitIn).isZero() &&
+        toDecimal(leg.creditOut).isZero()
+      ) {
+        const origMut = toDecimal(leg.originalMutation || 0);
+        const fxRate = toDecimal(leg.fxRateApplied || 0);
+        if (!origMut.isZero() && fxRate.greaterThan(0)) {
+          const baseEq = roundMoney(origMut.times(fxRate));
+          if (baseEq.greaterThan(0)) {
+            bucket.inflow = addMoney(bucket.inflow, baseEq);
+          } else if (baseEq.lessThan(0)) {
+            bucket.outflow = addMoney(bucket.outflow, baseEq.abs());
+          }
+        }
+      } else {
+        bucket.inflow = addMoney(bucket.inflow, leg.debitIn);
+        bucket.outflow = addMoney(bucket.outflow, leg.creditOut);
+      }
     }
   }
 
