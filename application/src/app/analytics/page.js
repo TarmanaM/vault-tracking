@@ -15,33 +15,23 @@ import {
   TextField,
   IconButton,
   Popover,
-  Divider,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
 } from "@mui/material";
-import TrendingUpIcon from "@mui/icons-material/TrendingUp";
-import TrendingDownIcon from "@mui/icons-material/TrendingDown";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
-import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
-import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import { LineChart } from "@mui/x-charts/LineChart";
 import { BarChart } from "@mui/x-charts/BarChart";
-import { PieChart } from "@mui/x-charts/PieChart";
 import { useQuery } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
-import { formatShortAxis, formatMoneyDisplay } from "@/lib/money";
-import MoneyValue from "@/components/MoneyValue";
+import { formatShortAxis, formatMoneyDisplay } from "@/shared/money";
 import LayerConsumptionOverview from "@/components/LayerConsumptionOverview";
 import {
   useChartLabelVisibility,
   ChartCardHeaderMenu,
   ChartDotLabelMark,
 } from "@/components/ChartCardHeaderMenu";
+import WealthKpiGrid from "@/features/analytics/WealthKpiGrid";
+import CashflowWaterfallCard from "@/features/analytics/CashflowWaterfallCard";
+import WealthDistributionAndTimelineSection from "@/features/analytics/WealthDistributionAndTimelineSection";
 
 const PRESET_RANGES = [
   { value: "1M", label: "1M" },
@@ -78,7 +68,6 @@ export default function AnalyticsPage() {
     },
   });
 
-  // Also read dashboard summary so monthly layer overview works smoothly on Journey page
   const { data: dashboardData } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => {
@@ -143,23 +132,33 @@ export default function AnalyticsPage() {
     setAnalyticsGlobalLabelsMode(next);
   };
 
-  const isUp = wealthComparison.direction === "UP";
-  const isDown = wealthComparison.direction === "DOWN";
-
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 1.5, sm: 3 }, px: { xs: 1.5, sm: 3 } }}>
-      {/* Header & Date Filter Bar (#xx) */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { md: "center" }, flexDirection: { xs: "column", md: "row" }, gap: 1.25, mb: { xs: 2, sm: 3 } }}>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: { md: "center" },
+          flexDirection: { xs: "column", md: "row" },
+          gap: 1.25,
+          mb: { xs: 2, sm: 3 },
+        }}
+      >
         <Box>
           <Stack direction="row" spacing={1} alignItems="center">
             <ShowChartIcon color="primary" />
-            <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A", fontSize: { xs: "1.2rem", sm: "1.5rem" } }}>
+            <Typography
+              variant="h5"
+              sx={{ fontWeight: 800, color: "#0F172A", fontSize: { xs: "1.2rem", sm: "1.5rem" } }}
+            >
               Wealth Journey &amp; Analytics
             </Typography>
           </Stack>
           <Typography variant="caption" color="text.secondary">
             Showing {dateRangeApplied.preset || preset} window
-            {dateRangeApplied.startDate ? ` (${dateRangeApplied.startDate} to ${dateRangeApplied.endDate})` : " (All Time)"}
+            {dateRangeApplied.startDate
+              ? ` (${dateRangeApplied.startDate} to ${dateRangeApplied.endDate})`
+              : " (All Time)"}
           </Typography>
         </Box>
 
@@ -194,7 +193,6 @@ export default function AnalyticsPage() {
         </Stack>
       </Box>
 
-      {/* Custom Date Inputs when CUSTOM selected */}
       {preset === "CUSTOM" && (
         <Card variant="outlined" sx={{ p: 2, mb: 3, bgcolor: "#FFFFFF" }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
@@ -220,240 +218,15 @@ export default function AnalyticsPage() {
         </Card>
       )}
 
-      {/* 1. Top KPI Cards (#3 & #11 compact 2x2 grid on mobile) */}
-      <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: { xs: 2, sm: 3 } }}>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card sx={{ bgcolor: "#0F172A", color: "#FFFFFF", height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.25, sm: 2 } }}>
-              <Typography variant="caption" sx={{ color: "#94A3B8", fontWeight: 700, fontSize: { xs: "0.65rem", sm: "0.75rem" } }}>
-                NET TOTAL WEALTH
-              </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800, my: 0.35, fontSize: { xs: "1.02rem", sm: "1.35rem" } }}>
-                <MoneyValue value={analytics.netTotalWealth} includeCents allowTapToggle />
-              </Typography>
-              {wealthComparison.comparisonLabel && (
-                <Chip
-                  size="small"
-                  icon={
-                    isUp ? (
-                      <TrendingUpIcon sx={{ fontSize: "0.85rem !important", color: "#10B981 !important" }} />
-                    ) : isDown ? (
-                      <TrendingDownIcon sx={{ fontSize: "0.85rem !important", color: "#F87171 !important" }} />
-                    ) : undefined
-                  }
-                  label={
-                    <Stack direction="row" spacing={0.35} alignItems="center" flexWrap="wrap">
-                      <span>
-                        {isUp ? "+" : ""}
-                        {wealthComparison.deltaPercent}% (<MoneyValue value={wealthComparison.deltaAmount} />)
-                      </span>
-                      <span>{wealthComparison.comparisonLabel}</span>
-                    </Stack>
-                  }
-                  sx={{
-                    mt: 0.25,
-                    height: "auto",
-                    "& .MuiChip-label": { whiteSpace: "normal", py: 0.25, px: 0.75 },
-                    fontSize: { xs: "0.6rem", sm: "0.68rem" },
-                    fontWeight: 700,
-                    bgcolor: isUp
-                      ? "rgba(16, 185, 129, 0.16)"
-                      : isDown
-                      ? "rgba(239, 68, 68, 0.18)"
-                      : "rgba(148, 163, 184, 0.16)",
-                    color: isUp ? "#34D399" : isDown ? "#FCA5A5" : "#CBD5E1",
-                  }}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
+      <WealthKpiGrid analytics={analytics} wealthComparison={wealthComparison} />
 
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.25, sm: 2 } }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, fontSize: { xs: "0.65rem", sm: "0.75rem" } }}>
-                LIQUID &amp; HELD
-              </Typography>
-              <Typography variant="h6" sx={{ fontWeight: 800, color: "#10B981", mt: 0.35, fontSize: { xs: "1.02rem", sm: "1.25rem" } }}>
-                <MoneyValue value={analytics.totalLiquid} includeCents allowTapToggle />
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.64rem", sm: "0.75rem" } }}>
-                Banks, Cash, Coin, Wallets
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+      <CashflowWaterfallCard
+        waterfallData={waterfallData}
+        showWaterfallLabels={showWaterfallLabels}
+        isPrivacyHidden={isPrivacyHidden}
+        openInfo={openInfo}
+      />
 
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.25, sm: 2 } }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, fontSize: { xs: "0.65rem", sm: "0.75rem" } }}>
-                OPEN RECEIVABLES
-              </Typography>
-              <Typography variant="h6" sx={{ fontWeight: 800, color: "#2563EB", mt: 0.35, fontSize: { xs: "1.02rem", sm: "1.25rem" } }}>
-                <MoneyValue value={analytics.totalReceivables} allowTapToggle />
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.64rem", sm: "0.75rem" } }}>
-                Piutang owed to you
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.25, sm: 2 } }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, fontSize: { xs: "0.65rem", sm: "0.75rem" } }}>
-                PAYABLES &amp; PAYLATER
-              </Typography>
-              <Typography variant="h6" sx={{ fontWeight: 800, color: "#DC2626", mt: 0.35, fontSize: { xs: "1.02rem", sm: "1.25rem" } }}>
-                <MoneyValue value={analytics.totalPayables} allowTapToggle />
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: "0.64rem", sm: "0.75rem" } }}>
-                Liabilities owed
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* 2. Cashflow Waterfall Chart (#3) */}
-      <Card sx={{ mb: { xs: 2, sm: 2.5 } }}>
-        <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 0.5 }}>
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                Cashflow Waterfall (Daily Net)
-              </Typography>
-              <Stack direction="row" spacing={1}>
-                <Chip size="small" label="Uang Masuk" sx={{ height: 20, fontSize: "0.68rem", bgcolor: "#DCFCE7", color: "#15803D", fontWeight: 700 }} />
-                <Chip size="small" label="Uang Keluar" sx={{ height: 20, fontSize: "0.68rem", bgcolor: "#FEE2E2", color: "#B91C1C", fontWeight: 700 }} />
-              </Stack>
-            </Stack>
-            <Stack direction="row" spacing={0.25} alignItems="center">
-              <ChartCardHeaderMenu chartKey="waterfall" pointCount={waterfallData.length} />
-              <IconButton
-                size="small"
-                onClick={(e) =>
-                  openInfo(
-                    e,
-                    "Cashflow Waterfall Chart",
-                    "Plots daily net cashflow delta (Debit - Kredit) cumulatively, rising green on inflow days and stepping red on outflow days. Excludes Initial Funds and internal Vault Transfers."
-                  )
-                }
-              >
-                <InfoOutlinedIcon fontSize="small" />
-              </IconButton>
-            </Stack>
-          </Box>
-          <Box sx={{ width: "100%", minWidth: 0, height: { xs: 240, sm: 290 } }}>
-            {waterfallData.length > 0 ? (
-              <BarChart
-                xAxis={[{ scaleType: "band", data: waterfallData.map((d) => d.date.slice(5)) }]}
-                yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
-                margin={{ top: 24, bottom: 28 }}
-                slotProps={{ legend: { hidden: true } }}
-                series={[
-                  {
-                    data: waterfallData.map((d) => d.posBase),
-                    stack: "wf",
-                    color: "transparent",
-                    valueFormatter: () => null,
-                  },
-                  {
-                    data: waterfallData.map((d) => d.negBase),
-                    stack: "wf",
-                    color: "transparent",
-                    valueFormatter: () => null,
-                  },
-                  {
-                    data: waterfallData.map((d) => d.inflowPos),
-                    stack: "wf",
-                    label: "Inflow (+)",
-                    color: "#16A34A",
-                    barLabelPlacement: "outside",
-                    barLabel: (item) => {
-                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
-                      const row = waterfallData[item.dataIndex];
-                      return row ? `+${formatShortAxis(Math.abs(row.delta), false)}` : null;
-                    },
-                    valueFormatter: (v, ctx) => {
-                      if (!v) return null;
-                      const row = waterfallData[ctx.dataIndex];
-                      if (isPrivacyHidden) return "Rp ••••••";
-                      return `+${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
-                    },
-                  },
-                  {
-                    data: waterfallData.map((d) => d.inflowNeg),
-                    stack: "wf",
-                    label: "Inflow (Below Zero)",
-                    color: "#16A34A",
-                    barLabelPlacement: "outside",
-                    barLabel: (item) => {
-                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
-                      const row = waterfallData[item.dataIndex];
-                      return row ? `+${formatShortAxis(Math.abs(row.delta), false)}` : null;
-                    },
-                    valueFormatter: (v, ctx) => {
-                      if (!v) return null;
-                      const row = waterfallData[ctx.dataIndex];
-                      if (isPrivacyHidden) return "Rp ••••••";
-                      return `+${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
-                    },
-                  },
-                  {
-                    data: waterfallData.map((d) => d.outflowPos),
-                    stack: "wf",
-                    label: "Outflow (-)",
-                    color: "#DC2626",
-                    barLabelPlacement: "outside",
-                    barLabel: (item) => {
-                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
-                      const row = waterfallData[item.dataIndex];
-                      return row ? formatShortAxis(row.delta, false) : null;
-                    },
-                    valueFormatter: (v, ctx) => {
-                      if (!v) return null;
-                      const row = waterfallData[ctx.dataIndex];
-                      if (isPrivacyHidden) return "Rp ••••••";
-                      return `${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
-                    },
-                  },
-                  {
-                    data: waterfallData.map((d) => d.outflowNeg),
-                    stack: "wf",
-                    label: "Outflow (Below Zero)",
-                    color: "#DC2626",
-                    barLabelPlacement: "outside",
-                    barLabel: (item) => {
-                      if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
-                      const row = waterfallData[item.dataIndex];
-                      return row ? formatShortAxis(row.delta, false) : null;
-                    },
-                    valueFormatter: (v, ctx) => {
-                      if (!v) return null;
-                      const row = waterfallData[ctx.dataIndex];
-                      if (isPrivacyHidden) return "Rp ••••••";
-                      return `${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
-                    },
-                  },
-                ]}
-                height={230}
-              />
-            ) : (
-              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-                <Typography variant="caption" color="text.secondary">
-                  No cashflow movement in selected date range.
-                </Typography>
-              </Box>
-            )}
-          </Box>
-        </CardContent>
-      </Card>
-
-      {/* 3. Daily Consumption & Monthly Consumption (#3) */}
       <Grid container spacing={{ xs: 1.5, sm: 2.5 }} sx={{ mb: { xs: 2, sm: 3 } }}>
         <Grid size={{ xs: 12, lg: 7 }}>
           <Card sx={{ height: "100%" }}>
@@ -588,230 +361,20 @@ export default function AnalyticsPage() {
         </Grid>
       </Grid>
 
-      {/* 4. Monthly Consumption Big-Number Layers (#3) */}
       <LayerConsumptionOverview currentMonth={dashboardData?.summary?.currentMonth} />
 
-      {/* 5. Current Wealth Distribution PieChart + Sorted Vault Breakdown Table (#2, 01.png, #3) */}
-      <Grid container spacing={{ xs: 1.5, sm: 2.5 }} sx={{ mb: { xs: 2, sm: 3 } }}>
-        <Grid size={{ xs: 12, md: 5 }}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-                Current Wealth Distribution
-              </Typography>
-              {wealthDistributionPie.length > 0 ? (
-                <Box sx={{ width: "100%", minWidth: 0, height: 295 }}>
-                  <PieChart
-                    series={[
-                      {
-                        data: wealthDistributionPie,
-                        innerRadius: 38,
-                        paddingAngle: 2,
-                        cornerRadius: 4,
-                        valueFormatter: (item) => moneyTooltipFormatter(item.value),
-                      },
-                    ]}
-                    slotProps={{
-                      legend: {
-                        direction: "horizontal",
-                        position: { vertical: "bottom", horizontal: "center" },
-                      },
-                    }}
-                    height={285}
-                  />
-                </Box>
-              ) : (
-                <Typography variant="caption" color="text.secondary">
-                  No positive vault assets yet.
-                </Typography>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
+      <WealthDistributionAndTimelineSection
+        wealthDistributionPie={wealthDistributionPie}
+        vaultFrequency={vaultFrequency}
+        wealthTimeline={wealthTimeline}
+        topConsumptiveTransactions={topConsumptiveTransactions}
+        showWealthLabels={showWealthLabels}
+        isPrivacyHidden={isPrivacyHidden}
+        moneyTooltipFormatter={moneyTooltipFormatter}
+        openChartDrawer={openChartDrawer}
+        openInfo={openInfo}
+      />
 
-        <Grid size={{ xs: 12, md: 7 }}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <AccountBalanceWalletIcon color="primary" fontSize="small" />
-                  <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                    Vault Breakdown &amp; Usage Frequency
-                  </Typography>
-                </Stack>
-                <IconButton
-                  size="small"
-                  onClick={(e) =>
-                    openInfo(
-                      e,
-                      "Vault Balance & Usage Summary",
-                      "Lists all active vaults sorted from highest current balance along with how many non-initial transactions used each vault in the selected date window. Tap any vault row to inspect its chart."
-                    )
-                  }
-                >
-                  <InfoOutlinedIcon fontSize="small" />
-                </IconButton>
-              </Box>
-
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: "#F1F5F9" }}>
-                      <TableCell sx={{ fontWeight: 800, fontSize: "0.74rem", py: 0.85, px: 1 }}>
-                        Vault
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.74rem", py: 0.85, px: 1 }}>
-                        Current Balance
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 800, fontSize: "0.74rem", py: 0.85, px: 1 }}>
-                        Uses
-                      </TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {vaultFrequency.map((vf) => (
-                      <TableRow
-                        key={vf.vaultId}
-                        hover
-                        onClick={() => openChartDrawer("VAULT", vf.vaultId, vf.name, vf.vaultType)}
-                        sx={{
-                          cursor: "pointer",
-                          "&:nth-of-type(even)": { bgcolor: "#F8FAFC" },
-                        }}
-                      >
-                        <TableCell sx={{ py: 0.85, px: 1 }}>
-                          <Stack direction="row" spacing={0.75} alignItems="center">
-                            <Box
-                              sx={{
-                                width: 8,
-                                height: 8,
-                                borderRadius: "50%",
-                                bgcolor: vf.color || "#2563EB",
-                                flexShrink: 0,
-                              }}
-                            />
-                            <Typography variant="body2" sx={{ fontWeight: 700, fontSize: { xs: "0.76rem", sm: "0.84rem" } }}>
-                              {vf.name}
-                            </Typography>
-                          </Stack>
-                        </TableCell>
-                        <TableCell align="right" sx={{ py: 0.85, px: 1, fontWeight: 700, fontSize: { xs: "0.76rem", sm: "0.84rem" } }}>
-                          <MoneyValue value={vf.currentBalance} includeCents allowTapToggle />
-                        </TableCell>
-                        <TableCell align="right" sx={{ py: 0.85, px: 1, fontWeight: 800, color: "#1E293B", fontSize: { xs: "0.76rem", sm: "0.84rem" } }}>
-                          {vf.count}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* 6. Wealth Trajectory Timeline & Top Consumptive Expenses (#3 aligned placement) */}
-      <Grid container spacing={{ xs: 1.5, sm: 2.5 }}>
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                  Wealth Trajectory Timeline
-                </Typography>
-                <Stack direction="row" spacing={0.25} alignItems="center">
-                  <ChartCardHeaderMenu chartKey="wealth-timeline" pointCount={wealthTimeline.length} />
-                  <IconButton
-                    size="small"
-                    onClick={(e) =>
-                      openInfo(
-                        e,
-                        "Wealth Trajectory Timeline",
-                        "Chronological curve of total Net Wealth (Liquid Vaults + Receivables - Payables) across the selected date range."
-                      )
-                    }
-                  >
-                    <InfoOutlinedIcon fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </Box>
-              <Box sx={{ width: "100%", minWidth: 0, height: { xs: 240, sm: 285 } }}>
-                {wealthTimeline.length > 0 ? (
-                  <LineChart
-                    xAxis={[{ scaleType: "point", data: wealthTimeline.map((p) => p.date.slice(5)) }]}
-                    yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
-                    margin={{ top: 24, right: 16, bottom: 24 }}
-                    slots={{ mark: ChartDotLabelMark }}
-                    slotProps={{
-                      mark: {
-                        showLabels: showWealthLabels,
-                        isPrivacyHidden,
-                      },
-                    }}
-                    series={[
-                      {
-                        id: "net-wealth",
-                        label: "Net Wealth",
-                        data: wealthTimeline.map((p) => p.wealth),
-                        color: "#2563EB",
-                        area: false,
-                        shape: "circle",
-                        showMark: showWealthLabels,
-                        valueFormatter: moneyTooltipFormatter,
-                      },
-                    ]}
-                    height={235}
-                  />
-                ) : (
-                  <Typography variant="caption" color="text.secondary">
-                    No wealth points in selected range.
-                  </Typography>
-                )}
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, lg: 6 }}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
-                <ReceiptLongOutlinedIcon color="error" fontSize="small" />
-                <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                  Top Consumptive Expenses
-                </Typography>
-              </Stack>
-
-              {topConsumptiveTransactions.length === 0 ? (
-                <Typography variant="caption" color="text.secondary">
-                  No consumptive transactions in range.
-                </Typography>
-              ) : (
-                <Stack spacing={1} divider={<Divider />}>
-                  {topConsumptiveTransactions.slice(0, 10).map((tx) => (
-                    <Box key={tx.id} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
-                          {tx.title}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {tx.date} • {tx.categoryName} • {tx.vaultName}
-                        </Typography>
-                      </Box>
-                      <Typography variant="body2" sx={{ fontWeight: 800, color: "#DC2626", flexShrink: 0 }}>
-                        <MoneyValue value={tx.amount} allowTapToggle />
-                      </Typography>
-                    </Box>
-                  ))}
-                </Stack>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Shared Info Popover */}
       <Popover
         open={Boolean(infoState.anchorEl)}
         anchorEl={infoState.anchorEl}

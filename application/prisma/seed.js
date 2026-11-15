@@ -49,8 +49,14 @@ async function main() {
   console.log(`- Synced ${templates.length} MasterCategoryTemplate rows`);
 
   // 2. Ensure initial ADMIN account exists cleanly (starts fresh at onboarding)
-  const initialUsername = process.env.SEED_ADMIN_USERNAME || "isa";
-  const initialPassword = process.env.SEED_ADMIN_PASSWORD || "admin123";
+  const initialUsername =
+    process.env.INITIAL_ADMIN_USERNAME ||
+    process.env.SEED_ADMIN_USERNAME ||
+    "admin";
+  const initialPassword =
+    process.env.INITIAL_ADMIN_PASSWORD ||
+    process.env.SEED_ADMIN_PASSWORD ||
+    "admin123";
   const passwordHash = await bcrypt.hash(initialPassword, 10);
 
   const adminUser = await prisma.user.upsert({
@@ -81,7 +87,9 @@ async function main() {
     },
   });
 
-  console.log(`- Initial ADMIN account ready: username="${adminUser.username}" (fresh onboarding pending)`);
+  console.log(
+    `- Initial ADMIN account ready: username="${adminUser.username}" (fresh onboarding pending)`,
+  );
   console.log("Database seeding completed successfully!");
 }
 

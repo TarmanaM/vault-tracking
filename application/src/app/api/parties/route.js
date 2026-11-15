@@ -1,86 +1,22 @@
 // API Route: GET & POST /api/parties
-// Allows creating new contacts / debt channels directly from UI (#17)
+// Lists and creates user-owned contacts / debt channels
 
-import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { withApiHandler } from "@/server/http/apiHandler";
+import {
+  findActiveUserParties,
+  createNewUserParty,
+} from "@/server/modules/parties/parties.service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request) {
-  const { user, errorResponse } = await requireUser(request);
-  if (errorResponse) return errorResponse;
+export const GET = withApiHandler(
+  async ({ user }) => {
+    return await findActiveUserParties(user.id);
+  },
+  { errorStatus: 500 }
+);
 
-  try {
-    const parties = await prisma.party.findMany({
-      where: { userId: user.id, isActive: true },
-      orderBy: { id: "asc" },
-    });
-    return NextResponse.json({ success: true, data: parties });
-  } catch (error) {
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to fetch parties" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(request) {
-  const { user, errorResponse } = await requireUser(request);
-  if (errorResponse) return errorResponse;
-
-  try {
-    const body = await request.json();
-    const {
-      name,
-      partyType = "FRIEND", // FRIEND, FAMILY, EMPLOYER, INSTITUTION, LENDER
-      alias = "",
-      externalAccount = "",
-      isDebtContact = false,
-    } = body;
-
-    if (!name || !name.trim()) {
-      return NextResponse.json({ success: false, error: "Contact name is required" }, { status: 400 });
-    }
-
-    const cleanName = name.trim();
-    const baseCode = cleanName
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, "_")
-      .replace(/^_|_$/g, "")
-      .slice(0, 20);
-
-    // Ensure unique party code per user
-    let code = baseCode || `PARTY_${Date.now()}`;
-    const existing = await prisma.party.findUnique({
-      where: { userId_code: { userId: user.id, code } },
-    });
-    if (existing) {
-      code = `${baseCode}_${Date.now().toString().slice(-4)}`;
-    }
-
-    const aliases = alias && alias.trim() ? [alias.trim()] : [];
-    const externalAccounts = externalAccount && externalAccount.trim() ? [externalAccount.trim()] : [];
-
-    const created = await prisma.party.create({
-      data: {
-        userId: user.id,
-        code,
-        name: cleanName,
-        partyType,
-        isDebtContact: Boolean(isDebtContact),
-        aliasesJson: aliases.length > 0 ? JSON.stringify(aliases) : null,
-        externalAccountsJson: externalAccounts.length > 0 ? JSON.stringify(externalAccounts) : null,
-      },
-    });
-
-    return NextResponse.json({ success: true, data: created });
-  } catch (error) {
-    console.error("Error in POST /api/parties:", error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to create contact" },
-      { status: 400 }
-    );
-  }
-}
-
+export const POST = withApiHandler(async ({ request, user }) => {
+  const body = await request.json().catch(() => ({}));
+  return await createNewUserParty(user.id, body);
+});

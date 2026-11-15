@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+**/.next
+**/.git
+.agents
+archive
+docs
+README.md
+desain-data-vault-tracking.txt
+application/.env
+application/.env.local

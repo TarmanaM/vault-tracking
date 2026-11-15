@@ -1,63 +1,48 @@
 // API Route: POST /api/media/vaults
-// Uploads cropped vault profile images to centralized data-server/media/vaults/
+// Stores cropped vault profile images in PostgreSQL media_assets (bytea)
 
-import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth";
-import { saveVaultProfileImage } from "@/lib/mediaStorage";
+import { withApiHandler } from "@/server/http/apiHandler";
+import { BadRequestError } from "@/server/http/errors";
+import { saveVaultProfileImage } from "@/server/modules/media/media.service";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request) {
-  const { user, errorResponse } = await requireUser(request);
-  if (errorResponse) return errorResponse;
+export const POST = withApiHandler(async ({ request, user }) => {
+  const contentType = request.headers.get("content-type") || "";
+  let buffer = null;
+  let mimeType = "image/webp";
+  let vaultSlug = "vault";
 
-  try {
-    const contentType = request.headers.get("content-type") || "";
-    let buffer = null;
-    let mimeType = "image/png";
-    let vaultSlug = "vault";
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await request.formData();
+    const file = formData.get("file");
+    vaultSlug = String(formData.get("vaultSlug") || "vault");
 
-    if (contentType.includes("multipart/form-data")) {
-      const formData = await request.formData();
-      const file = formData.get("file");
-      vaultSlug = String(formData.get("vaultSlug") || "vault");
-
-      if (!file || typeof file.arrayBuffer !== "function") {
-        return NextResponse.json(
-          { success: false, error: "Image file is required" },
-          { status: 400 }
-        );
-      }
-
-      const arr = await file.arrayBuffer();
-      buffer = Buffer.from(arr);
-      mimeType = file.type || "image/png";
-    } else {
-      const body = await request.json();
-      vaultSlug = String(body.vaultSlug || "vault");
-      const dataUrl = String(body.dataUrl || "");
-      const match = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,(.+)$/i);
-      if (!match) {
-        return NextResponse.json(
-          { success: false, error: "Invalid image payload" },
-          { status: 400 }
-        );
-      }
-      mimeType = match[1].toLowerCase();
-      buffer = Buffer.from(match[2], "base64");
+    if (!file || typeof file.arrayBuffer !== "function") {
+      throw new BadRequestError("Image file is required");
     }
 
-    const url = await saveVaultProfileImage({ userId: user.id, buffer, mimeType, vaultSlug });
-
-    return NextResponse.json({
-      success: true,
-      data: { url },
-    });
-  } catch (error) {
-    console.error("Error in POST /api/media/vaults:", error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to save vault image" },
-      { status: 400 }
-    );
+    const arr = await file.arrayBuffer();
+    buffer = Buffer.from(arr);
+    mimeType = file.type || "image/webp";
+  } else {
+    const body = await request.json().catch(() => ({}));
+    vaultSlug = String(body.vaultSlug || "vault");
+    const dataUrl = String(body.dataUrl || "");
+    const match = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,(.+)$/i);
+    if (!match) {
+      throw new BadRequestError("Invalid image payload");
+    }
+    mimeType = match[1].toLowerCase();
+    buffer = Buffer.from(match[2], "base64");
   }
-}
+
+  const url = await saveVaultProfileImage({
+    userId: user.id,
+    buffer,
+    mimeType,
+    vaultSlug,
+  });
+
+  return { url };
+});

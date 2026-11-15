@@ -1,9 +1,8 @@
 // API Route: POST /api/settings/fx/sync
-// Manually triggers live exchange rate fetch from Frankfurter v2 into ExchangeRateCache (#4)
+// Manually triggers live exchange rate fetch from Frankfurter v2 into ExchangeRateCache
 
-import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import prisma from "@/server/db/prisma";
+import { withApiHandler } from "@/server/http/apiHandler";
 import {
   getOrCreateAppSettings,
   getCachedRateMap,
@@ -14,11 +13,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request) {
-  try {
-    const { user, errorResponse } = await requireUser(request);
-    if (errorResponse) return errorResponse;
-
+export const POST = withApiHandler(
+  async ({ user }) => {
     const syncResult = await syncFxRatesFromFrankfurter({ userId: user.id, force: true });
 
     const settings = await getOrCreateAppSettings(user.id);
@@ -31,23 +27,15 @@ export async function POST(request) {
       getActiveForeignCurrencies(user.id, settings.baseCurrency),
     ]);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        syncResult,
-        settings,
-        rates,
-        rateMap,
-        activeForeignCurrencies,
-        fxSyncEnabled: activeForeignCurrencies.length > 0,
-        supportedCurrencies: SUPPORTED_CURRENCIES,
-      },
-    });
-  } catch (error) {
-    console.error("Error in POST /api/settings/fx/sync:", error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to sync FX rates" },
-      { status: 500 }
-    );
-  }
-}
+    return {
+      syncResult,
+      settings,
+      rates,
+      rateMap,
+      activeForeignCurrencies,
+      fxSyncEnabled: activeForeignCurrencies.length > 0,
+      supportedCurrencies: SUPPORTED_CURRENCIES,
+    };
+  },
+  { errorStatus: 500 }
+);

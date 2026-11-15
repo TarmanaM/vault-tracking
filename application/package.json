@@ -9,7 +9,8 @@
     "prod-pubs": "ipconfig | findstr /i \"ipv4\" & next build && next start --hostname 0.0.0.0 --port 3000",
     "pubs": "next start --hostname 0.0.0.0 --port 3000",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:api": "node scripts/verify-v2-api.mjs"
   },
   "dependencies": {
     "@emotion/cache": "^11.14.0",
@@ -29,6 +30,8 @@
     "next": "15.5.29",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7",
     "zustand": "^5.1.0"
   },
   "devDependencies": {
@@ -36,8 +39,5 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.29",
     "prisma": "^6.19.3"
-  },
-  "prisma": {
-    "seed": "node prisma/seed.js"
   }
 }

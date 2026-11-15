@@ -12,57 +12,30 @@ import {
   Stack,
   Typography,
   Alert,
-  RadioGroup,
-  FormControlLabel,
-  Radio,
-  Autocomplete,
   IconButton,
   Popover,
   Box,
   Chip,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   useTheme,
   useMediaQuery,
 } from "@mui/material";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import AccessTimeIcon from "@mui/icons-material/AccessTime";
-import PersonAddAlt1OutlinedIcon from "@mui/icons-material/PersonAddAlt1Outlined";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import CloseIcon from "@mui/icons-material/Close";
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
-import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
-import FlashOnIcon from "@mui/icons-material/FlashOn";
-import HistoryIcon from "@mui/icons-material/History";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
-import { TimePicker } from "@mui/x-date-pickers/TimePicker";
 import dayjs from "dayjs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import CurrencyTextField from "@/components/CurrencyTextField";
 import MoneyValue from "@/components/MoneyValue";
 import CoinExpenseControls from "@/components/CoinExpenseControls";
-import VaultAvatar from "@/components/VaultAvatar";
-import { isPhysicalCashVault } from "@/lib/vaultHelpers";
-import { SUPPORTED_CURRENCIES, formatNativeMoney } from "@/lib/currencyHelpers";
-import { isTransactionPromotable, normalizeCardTitle } from "@/lib/cardPromotionUtils";
-
-const PRIMARY_TYPE_PILLS = [
-  { key: "EXPENSE", label: "Expense", color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
-  { key: "INCOME", label: "Income", color: "#059669", bg: "#ECFDF5", border: "#A7F3D0" },
-  { key: "TRANSFER", label: "Transfer", color: "#2563EB", bg: "#EFF6FF", border: "#BFDBFE" },
-  { key: "DEBT", label: "Debt / Loan", color: "#D97706", bg: "#FFFBEB", border: "#FDE68A" },
-];
-
-const DEBT_SUB_PILLS = [
-  { value: "RECEIVABLE_LEND", label: "Lent / Talangi" },
-  { value: "RECEIVABLE_COLLECT", label: "Collected Debt" },
-  { value: "PAYABLE_BORROW", label: "Borrowed / Utang" },
-  { value: "PAYABLE_REPAY", label: "Repay Debt / PayLater" },
-];
+import { isPhysicalCashVault } from "@/shared/vaultHelpers";
+import { SUPPORTED_CURRENCIES, formatNativeMoney } from "@/shared/currencyHelpers";
+import { isTransactionPromotable } from "@/shared/cardPromotionUtils";
+import TransactionNatureAndTitleSection, {
+  PRIMARY_TYPE_PILLS,
+} from "@/features/transactions/TransactionNatureAndTitleSection";
+import TransactionVaultAndTransferSection from "@/features/transactions/TransactionVaultAndTransferSection";
+import TransactionDebtAndOptionsSection from "@/features/transactions/TransactionDebtAndOptionsSection";
 
 function getNowDayjs() {
   return dayjs();
@@ -126,7 +99,6 @@ export default function CustomTransactionModal({
     [parties]
   );
 
-  // Helper to resolve default sub-vault on any vault cleanly (#3 silent default)
   const findDefaultSubId = (vId) => {
     const v = vaults.find((item) => String(item.id) === String(vId));
     if (!v || !v.subContainers || v.subContainers.length === 0) return "";
@@ -134,7 +106,6 @@ export default function CustomTransactionModal({
     return def ? String(def.id) : "";
   };
 
-  // Sync preset values whenever the dialog opens
   useEffect(() => {
     if (!transactionDialog.open) return;
 
@@ -252,10 +223,8 @@ export default function CustomTransactionModal({
     nature === "PAYABLE_REPAY";
 
   const activePrimaryKey = isDebtNature ? "DEBT" : nature;
-
   const isSettlementNature =
     nature === "RECEIVABLE_COLLECT" || nature === "PAYABLE_REPAY";
-
   const needsVaultSelection =
     nature !== "PAYABLE_BORROW" || payableMode === "CASH_LOAN";
 
@@ -317,7 +286,6 @@ export default function CustomTransactionModal({
     [parties, partyId]
   );
 
-  // Sync FX calculation preview when spending/receiving foreign Valas
   const isForeignEntry = entryCurrency !== baseUpper;
   const cachedFxRate = Number(exchangeRates?.[entryCurrency]?.rate || 0);
   const effectiveFxRate =
@@ -327,7 +295,6 @@ export default function CustomTransactionModal({
       ? Number(grossAmount) * effectiveFxRate
       : null;
 
-  // Non-blocking warning if transaction hits unallocated pool and crosses synced splits (#3)
   const potentialSpilloverHint = useMemo(() => {
     if (!needsVaultSelection || !selectedSourceVaultObj || isForeignEntry) return null;
     if (nature !== "EXPENSE" && nature !== "TRANSFER" && nature !== "RECEIVABLE_LEND" && nature !== "PAYABLE_REPAY") {
@@ -349,7 +316,6 @@ export default function CustomTransactionModal({
     return null;
   }, [needsVaultSelection, selectedSourceVaultObj, selectedSourceSubObj, isForeignEntry, nature, grossAmount, baseUpper]);
 
-  // Ensure non-SELF party default is picked when switching into debt natures
   useEffect(() => {
     if (!transactionDialog.open) return;
     if (isDebtNature && (!partyId || String(partyId) === String(selfParty?.id))) {
@@ -360,7 +326,6 @@ export default function CustomTransactionModal({
     }
   }, [isDebtNature, partyId, parties, selfParty, transactionDialog.open]);
 
-  // Fetch party's open debt items for specific vs FIFO settlement (#17)
   const { data: partyDetail } = useQuery({
     queryKey: ["debt-detail", partyId],
     queryFn: async () => {
@@ -387,7 +352,6 @@ export default function CustomTransactionModal({
   const txDateStr = dateValue && dateValue.isValid() ? dateValue.format("YYYY-MM-DD") : getNowDayjs().format("YYYY-MM-DD");
   const txTimeStr = timeValue && timeValue.isValid() ? timeValue.format("HH:mm") : getNowDayjs().format("HH:mm");
 
-  // #15 Auto-Detect Retroactive against latest checkpoint of the affected vault
   const retroactiveAlert = useMemo(() => {
     if (!needsVaultSelection || !sourceVaultId || !txDateStr) return null;
     const latestCp = latestCheckpointsByVault[sourceVaultId];
@@ -482,7 +446,6 @@ export default function CustomTransactionModal({
       setPartyId(String(option.partyId));
     }
 
-    // Preserve user-entered Amount if already typed before picking Title
     setGrossAmount((prev) => {
       if (prev !== "" && Number(prev) > 0) return prev;
       return option.defaultAmount > 0 ? option.defaultAmount : "";
@@ -668,7 +631,6 @@ export default function CustomTransactionModal({
       }}
     >
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        {/* Clean Flagship Header (#9) */}
         <DialogTitle
           sx={{
             fontWeight: 800,
@@ -717,189 +679,25 @@ export default function CustomTransactionModal({
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 2, pb: 3 }}>
           {errorMsg && <Alert severity="error">{errorMsg}</Alert>}
 
-          {/* 1. Segmented Color-Coded Nature Selector (#9) */}
-          <Box>
-            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-              {PRIMARY_TYPE_PILLS.map((pill) => {
-                const selected = activePrimaryKey === pill.key;
-                return (
-                  <Chip
-                    key={pill.key}
-                    label={pill.label}
-                    clickable
-                    onClick={() => {
-                      if (pill.key === "DEBT") {
-                        if (!isDebtNature) setNature("RECEIVABLE_LEND");
-                      } else {
-                        setNature(pill.key);
-                      }
-                    }}
-                    sx={{
-                      flex: "1 1 0",
-                      minWidth: 74,
-                      height: 36,
-                      fontWeight: 800,
-                      fontSize: "0.78rem",
-                      borderRadius: 2,
-                      bgcolor: selected ? pill.bg : "#F8FAFC",
-                      color: selected ? pill.color : "#475569",
-                      border: `1.5px solid ${selected ? pill.color : "#E2E8F0"}`,
-                    }}
-                  />
-                );
-              })}
-            </Stack>
+          <TransactionNatureAndTitleSection
+            activePrimaryKey={activePrimaryKey}
+            isDebtNature={isDebtNature}
+            nature={nature}
+            setNature={setNature}
+            sortedTitleOptions={sortedTitleOptions}
+            title={title}
+            setTitle={setTitle}
+            selectedCardId={selectedCardId}
+            setSelectedCardId={setSelectedCardId}
+            selectedCardTitle={selectedCardTitle}
+            setSelectedCardTitle={setSelectedCardTitle}
+            handleSelectTitleOption={handleSelectTitleOption}
+            categoryId={categoryId}
+            setCategoryId={setCategoryId}
+            filteredCategories={filteredCategories}
+            baseUpper={baseUpper}
+          />
 
-            {activePrimaryKey === "DEBT" && (
-              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                {DEBT_SUB_PILLS.map((d) => (
-                  <Chip
-                    key={d.value}
-                    label={d.label}
-                    size="small"
-                    clickable
-                    color={nature === d.value ? "warning" : "default"}
-                    variant={nature === d.value ? "filled" : "outlined"}
-                    onClick={() => setNature(d.value)}
-                    sx={{ fontWeight: 700, fontSize: "0.72rem" }}
-                  />
-                ))}
-              </Stack>
-            )}
-          </Box>
-
-          {/* 2. Transaction Title Autocomplete (Cards + History) & Category Row */}
-          <Box>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-              <Autocomplete
-                freeSolo
-                fullWidth
-                size="small"
-                options={sortedTitleOptions}
-                value={null}
-                inputValue={title}
-                getOptionLabel={(opt) => (typeof opt === "string" ? opt : opt.title || "")}
-                isOptionEqualToValue={(opt, val) => opt?.suggestionKey === val?.suggestionKey}
-                filterOptions={(opts, state) => {
-                  const q = normalizeCardTitle(state.inputValue);
-                  if (!q) return opts.slice(0, 14);
-                  return opts.filter((o) => normalizeCardTitle(o.title).includes(q)).slice(0, 14);
-                }}
-                onChange={(_, selectedOpt) => {
-                  if (selectedOpt && typeof selectedOpt !== "string") {
-                    handleSelectTitleOption(selectedOpt);
-                  }
-                }}
-                onInputChange={(_, newInputValue, reason) => {
-                  if (reason === "input" || reason === "clear") {
-                    setTitle(newInputValue);
-                    if (
-                      selectedCardId &&
-                      normalizeCardTitle(newInputValue) !== normalizeCardTitle(selectedCardTitle)
-                    ) {
-                      setSelectedCardId(null);
-                      setSelectedCardTitle("");
-                    }
-                  }
-                }}
-                renderOption={(props, option) => {
-                  const { key, ...restProps } = props;
-                  return (
-                    <Box
-                      component="li"
-                      key={key || option.suggestionKey}
-                      {...restProps}
-                      sx={{
-                        display: "flex !important",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: 1,
-                        py: 0.75,
-                      }}
-                    >
-                      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
-                        {option.kind === "CARD" ? (
-                          <Chip
-                            size="small"
-                            icon={<FlashOnIcon sx={{ fontSize: "0.75rem !important" }} />}
-                            label="Card"
-                            color="primary"
-                            sx={{ height: 20, fontSize: "0.66rem", fontWeight: 800, flexShrink: 0 }}
-                          />
-                        ) : (
-                          <Chip
-                            size="small"
-                            icon={<HistoryIcon sx={{ fontSize: "0.75rem !important" }} />}
-                            label={`${option.totalUses}x`}
-                            variant="outlined"
-                            sx={{ height: 20, fontSize: "0.66rem", fontWeight: 700, flexShrink: 0 }}
-                          />
-                        )}
-                        <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
-                          {option.title}
-                        </Typography>
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary" noWrap sx={{ flexShrink: 0 }}>
-                        {[option.nature !== nature ? option.nature : null, option.sourceVaultName]
-                          .filter(Boolean)
-                          .join(" • ")}
-                        {option.defaultAmount > 0 && (
-                          <>
-                            {" "}
-                            • <MoneyValue value={option.defaultAmount} currency={option.currency || baseUpper} />
-                          </>
-                        )}
-                      </Typography>
-                    </Box>
-                  );
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Transaction Title"
-                    placeholder="Type or pick Card / past transaction..."
-                  />
-                )}
-              />
-
-              {(nature === "EXPENSE" || nature === "INCOME" || nature === "PAYABLE_BORROW") && (
-                <TextField
-                  select
-                  label="Category"
-                  size="small"
-                  fullWidth
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                >
-                  <MenuItem value="">Auto / Uncategorized</MenuItem>
-                  {filteredCategories.map((c) => (
-                    <MenuItem key={c.id} value={c.id}>
-                      {c.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              )}
-            </Stack>
-
-            {selectedCardId && (
-              <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.75 }}>
-                <Chip
-                  size="small"
-                  color="primary"
-                  variant="outlined"
-                  icon={<FlashOnIcon sx={{ fontSize: "0.78rem !important" }} />}
-                  label={`Linked to Card: "${selectedCardTitle || title}"`}
-                  onDelete={() => {
-                    setSelectedCardId(null);
-                    setSelectedCardTitle("");
-                  }}
-                  sx={{ fontWeight: 700, fontSize: "0.72rem" }}
-                />
-              </Stack>
-            )}
-          </Box>
-
-          {/* 3. Hero Amount Section + Currency Badge + Live FX Conversion Preview (#4, #9) */}
           <Box
             sx={{
               p: 2,
@@ -981,158 +779,28 @@ export default function CustomTransactionModal({
             )}
           </Box>
 
-          {/* 3. Visual Vault & Optional Sub-Vault Pocket Picker (#3, #7, #9) */}
-          {needsVaultSelection && (
-            <Box>
-              <Typography variant="caption" sx={{ fontWeight: 800, color: "#475569", display: "block", mb: 0.75 }}>
-                {nature === "INCOME" || nature === "RECEIVABLE_COLLECT"
-                  ? "DESTINATION VAULT"
-                  : nature === "TRANSFER"
-                  ? "FROM SOURCE VAULT"
-                  : "PAYMENT VAULT"}
-              </Typography>
+          <TransactionVaultAndTransferSection
+            needsVaultSelection={needsVaultSelection}
+            nature={nature}
+            vaults={vaults}
+            sourceVaultId={sourceVaultId}
+            handleSelectSourceVault={handleSelectSourceVault}
+            selectedSourceVaultObj={selectedSourceVaultObj}
+            sourceSubContainerId={sourceSubContainerId}
+            handleSelectSourceSub={handleSelectSourceSub}
+            potentialSpilloverHint={potentialSpilloverHint}
+            targetVaultId={targetVaultId}
+            handleSelectTargetVault={handleSelectTargetVault}
+            selectedTargetVaultObj={selectedTargetVaultObj}
+            targetSubContainerId={targetSubContainerId}
+            setTargetSubContainerId={setTargetSubContainerId}
+            selectedTargetSubObj={selectedTargetSubObj}
+            entryCurrency={entryCurrency}
+            baseUpper={baseUpper}
+            targetTransferAmount={targetTransferAmount}
+            setTargetTransferAmount={setTargetTransferAmount}
+          />
 
-              <Box
-                sx={{
-                  display: "flex",
-                  gap: 0.75,
-                  overflowX: "auto",
-                  pb: 0.75,
-                  "&::-webkit-scrollbar": { height: 5 },
-                }}
-              >
-                {vaults.map((v) => {
-                  const selected = String(v.id) === String(sourceVaultId);
-                  return (
-                    <Chip
-                      key={v.id}
-                      avatar={<VaultAvatar vault={v} size={22} shape="circle" />}
-                      label={v.name}
-                      clickable
-                      onClick={() => handleSelectSourceVault(v.id)}
-                      color={selected ? "primary" : "default"}
-                      variant={selected ? "filled" : "outlined"}
-                      sx={{
-                        height: 32,
-                        fontWeight: selected ? 800 : 600,
-                        flexShrink: 0,
-                        borderColor: selected ? undefined : "#CBD5E1",
-                      }}
-                    />
-                  );
-                })}
-              </Box>
-
-              {/* Sub-Vault Pocket Chips if the Vault has sub-containers (#3) */}
-              {selectedSourceVaultObj?.subContainers?.length > 0 && (
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.75, alignItems: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, mr: 0.5 }}>
-                    Pocket:
-                  </Typography>
-                  {selectedSourceVaultObj.subContainers.map((sc) => {
-                    const isPicked = String(sc.id) === String(sourceSubContainerId);
-                    const bal = sc.effectiveBalance ?? sc.currentBalance ?? sc.lastCountedBalance;
-                    return (
-                      <Chip
-                        key={sc.id}
-                        size="small"
-                        clickable
-                        onClick={() => handleSelectSourceSub(sc)}
-                        color={isPicked ? "secondary" : "default"}
-                        variant={isPicked ? "filled" : "outlined"}
-                        label={
-                          <>
-                            {sc.name} ({sc.currency}): <MoneyValue value={bal} currency={sc.currency || baseUpper} />
-                          </>
-                        }
-                        sx={{ height: 24, fontSize: "0.7rem", fontWeight: isPicked ? 700 : 500 }}
-                      />
-                    );
-                  })}
-                </Stack>
-              )}
-
-              {potentialSpilloverHint && (
-                <Alert severity="warning" icon={<WarningAmberIcon fontSize="small" />} sx={{ mt: 1, py: 0.4 }}>
-                  <Typography variant="caption">{potentialSpilloverHint}</Typography>
-                </Alert>
-              )}
-            </Box>
-          )}
-
-          {/* Transfer Target Vault & Target Pocket Picker (including intra-vault currency splits!) */}
-          {nature === "TRANSFER" && (
-            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-              <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.75 }}>
-                <ArrowForwardIcon fontSize="small" color="primary" />
-                <Typography variant="caption" sx={{ fontWeight: 800, color: "#1E3A8A" }}>
-                  TO TARGET VAULT
-                </Typography>
-              </Stack>
-
-              <Box
-                sx={{
-                  display: "flex",
-                  gap: 0.75,
-                  overflowX: "auto",
-                  pb: 0.75,
-                }}
-              >
-                {vaults.map((v) => {
-                  const selected = String(v.id) === String(targetVaultId);
-                  return (
-                    <Chip
-                      key={v.id}
-                      avatar={<VaultAvatar vault={v} size={22} shape="circle" />}
-                      label={v.name}
-                      clickable
-                      onClick={() => handleSelectTargetVault(v.id)}
-                      color={selected ? "info" : "default"}
-                      variant={selected ? "filled" : "outlined"}
-                      sx={{ height: 32, fontWeight: selected ? 800 : 600, flexShrink: 0 }}
-                    />
-                  );
-                })}
-              </Box>
-
-              {selectedTargetVaultObj?.subContainers?.length > 0 && (
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5, alignItems: "center" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, mr: 0.5 }}>
-                    Target Pocket:
-                  </Typography>
-                  {selectedTargetVaultObj.subContainers.map((sc) => {
-                    const isPicked = String(sc.id) === String(targetSubContainerId);
-                    return (
-                      <Chip
-                        key={sc.id}
-                        size="small"
-                        clickable
-                        onClick={() => setTargetSubContainerId(String(sc.id))}
-                        color={isPicked ? "info" : "default"}
-                        variant={isPicked ? "filled" : "outlined"}
-                        label={`${sc.name} (${sc.currency})`}
-                        sx={{ height: 24, fontSize: "0.7rem", fontWeight: isPicked ? 700 : 500 }}
-                      />
-                    );
-                  })}
-                </Stack>
-              )}
-
-              {selectedTargetSubObj &&
-                String(selectedTargetSubObj.currency || baseUpper).toUpperCase() !== entryCurrency && (
-                  <Box sx={{ mt: 1.25 }}>
-                    <CurrencyTextField
-                      label={`Received in ${selectedTargetSubObj.currency} (Optional override)`}
-                      value={targetTransferAmount}
-                      onValueChange={(num) => setTargetTransferAmount(num)}
-                      helperText={`Leave blank to auto-convert via cached FX rate into ${selectedTargetSubObj.currency}.`}
-                    />
-                  </Box>
-                )}
-            </Box>
-          )}
-
-          {/* Physical Cash Coin Split / Coin Change Controls */}
           {showCoinControls && (
             <CoinExpenseControls
               grossAmount={grossAmount}
@@ -1145,201 +813,40 @@ export default function CustomTransactionModal({
             />
           )}
 
-          {/* Debt & Contact Contextual Controls */}
-          {isDebtNature && (
-            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", flexDirection: "column", gap: 1.5 }}>
-              {nature === "PAYABLE_BORROW" && (
-                <Box>
-                  <Typography variant="caption" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>
-                    How did this borrowing happen?
-                  </Typography>
-                  <RadioGroup
-                    row
-                    value={payableMode}
-                    onChange={(e) => setPayableMode(e.target.value)}
-                  >
-                    <FormControlLabel
-                      value="EXPENSE_TALANG"
-                      control={<Radio size="small" />}
-                      label={<Typography variant="caption">Covered Directly (Expense + Debt)</Typography>}
-                    />
-                    <FormControlLabel
-                      value="CASH_LOAN"
-                      control={<Radio size="small" />}
-                      label={<Typography variant="caption">Cash / Transfer Loan to My Vault</Typography>}
-                    />
-                  </RadioGroup>
-                </Box>
-              )}
-
-              <Box>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <TextField
-                    select
-                    label="Counterparty / Lender / Friend"
-                    size="small"
-                    fullWidth
-                    value={partyId}
-                    onChange={(e) => {
-                      setPartyId(e.target.value);
-                      setReferenceDebtId("");
-                    }}
-                  >
-                    {partyList.map((p) => (
-                      <MenuItem key={p.id} value={p.id}>
-                        {p.name} ({p.partyType})
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<PersonAddAlt1OutlinedIcon />}
-                    onClick={() =>
-                      openAddPartyDialog((created) => setPartyId(String(created.id)), {
-                        isDebtContact: true,
-                      })
-                    }
-                    sx={{ flexShrink: 0, whiteSpace: "nowrap" }}
-                  >
-                    + Contact
-                  </Button>
-                </Stack>
-              </Box>
-
-              {isSettlementNature && (
-                <TextField
-                  select
-                  label={
-                    nature === "RECEIVABLE_COLLECT"
-                      ? "Settle Which Open Receivable?"
-                      : "Pay Which Open Payable?"
-                  }
-                  size="small"
-                  fullWidth
-                  value={referenceDebtId}
-                  onChange={(e) => setReferenceDebtId(e.target.value)}
-                >
-                  <MenuItem value="">Auto FIFO (Oldest First)</MenuItem>
-                  {openItemsForSettlement.map((item) => (
-                    <MenuItem key={item.id} value={String(item.id)}>
-                      {item.transaction?.title || "Open Item"} — Rem:{" "}
-                      {formatNativeMoney(item.remainingOpenAmount, baseUpper)}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              )}
-
-              <Autocomplete
-                freeSolo
-                size="small"
-                options={savedExternalAccounts}
-                value={counterpartyAccountNote}
-                onInputChange={(_, newVal) => setCounterpartyAccountNote(newVal)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Counterparty External Account (Optional)"
-                    placeholder="e.g. BRI - Amet, BCA - Nando"
-                  />
-                )}
-              />
-            </Box>
-          )}
-
-          {/* 5. Spacious Mobile-Friendly Date & Time Pickers + Now Button (#6) */}
-          <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.25 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800, color: "#475569" }}>
-                TRANSACTION DATE &amp; TIME
-              </Typography>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<AccessTimeIcon />}
-                onClick={() => {
-                  const nowDt = getNowDayjs();
-                  setDateValue(nowDt);
-                  setTimeValue(nowDt);
-                }}
-                sx={{ height: 26, fontSize: "0.72rem", fontWeight: 700 }}
-              >
-                Now
-              </Button>
-            </Stack>
-
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-              <DatePicker
-                label="Date"
-                value={dateValue}
-                onChange={(newVal) => newVal && setDateValue(newVal)}
-                format="DD MMM YYYY"
-                slotProps={{ textField: { size: "small", fullWidth: true } }}
-              />
-              <TimePicker
-                label="Time"
-                value={timeValue}
-                onChange={(newVal) => newVal && setTimeValue(newVal)}
-                ampm={false}
-                slotProps={{ textField: { size: "small", fullWidth: true } }}
-              />
-            </Stack>
-
-            {retroactiveAlert && (
-              <Alert severity="info" sx={{ mt: 1.25, py: 0.5 }}>
-                <Typography variant="caption">
-                  <b>Retroactive Absorbed Mode:</b> This date precedes checkpoint &quot;{retroactiveAlert.periodLabel}&quot; ({retroactiveAlert.checkpointDate}). Live vault balance stays intact and discrepancies auto-adjust.
-                </Typography>
-              </Alert>
-            )}
-          </Box>
-
-          {/* 6. Collapsible More Options (Admin Fee, Manual FX Rate Override, Notes) (#9) */}
-          <Accordion
-            expanded={moreExpanded || isForeignEntry}
-            onChange={(_, exp) => setMoreExpanded(exp)}
-            variant="outlined"
-            sx={{ borderRadius: "10px !important", "&:before": { display: "none" } }}
-          >
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <TuneOutlinedIcon fontSize="small" color="action" />
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#334155" }}>
-                  More Options (Admin Fee, Notes{isForeignEntry ? ", FX Rate" : ""})
-                </Typography>
-              </Stack>
-            </AccordionSummary>
-            <AccordionDetails sx={{ display: "flex", flexDirection: "column", gap: 1.5, pt: 0 }}>
-              {isForeignEntry && (
-                <TextField
-                  size="small"
-                  type="number"
-                  label={`FX Rate Override (1 ${entryCurrency} = ? ${baseUpper})`}
-                  placeholder={cachedFxRate > 0 ? String(cachedFxRate) : "Enter rate"}
-                  value={manualFxRate}
-                  onChange={(e) => setManualFxRate(e.target.value)}
-                  helperText="Optional override. Saved rate locks permanently onto this historical transaction."
-                />
-              )}
-
-              <CurrencyTextField
-                label={`Admin Fee / Auto-Split Tax (${entryCurrency})`}
-                value={taxFeeAmount}
-                onValueChange={(num) => setTaxFeeAmount(num)}
-                helperText="Automatically split into a separate child EXP_ADMIN_TAX record."
-              />
-
-              <TextField
-                label="Notes / Receipt Reference (Optional)"
-                multiline
-                minRows={2}
-                size="small"
-                fullWidth
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </AccordionDetails>
-          </Accordion>
+          <TransactionDebtAndOptionsSection
+            isDebtNature={isDebtNature}
+            nature={nature}
+            payableMode={payableMode}
+            setPayableMode={setPayableMode}
+            partyId={partyId}
+            setPartyId={setPartyId}
+            setReferenceDebtId={setReferenceDebtId}
+            partyList={partyList}
+            openAddPartyDialog={openAddPartyDialog}
+            isSettlementNature={isSettlementNature}
+            referenceDebtId={referenceDebtId}
+            openItemsForSettlement={openItemsForSettlement}
+            baseUpper={baseUpper}
+            savedExternalAccounts={savedExternalAccounts}
+            counterpartyAccountNote={counterpartyAccountNote}
+            setCounterpartyAccountNote={setCounterpartyAccountNote}
+            dateValue={dateValue}
+            setDateValue={setDateValue}
+            timeValue={timeValue}
+            setTimeValue={setTimeValue}
+            retroactiveAlert={retroactiveAlert}
+            moreExpanded={moreExpanded}
+            setMoreExpanded={setMoreExpanded}
+            isForeignEntry={isForeignEntry}
+            entryCurrency={entryCurrency}
+            cachedFxRate={cachedFxRate}
+            manualFxRate={manualFxRate}
+            setManualFxRate={setManualFxRate}
+            taxFeeAmount={taxFeeAmount}
+            setTaxFeeAmount={setTaxFeeAmount}
+            notes={notes}
+            setNotes={setNotes}
+          />
         </DialogContent>
 
         <DialogActions

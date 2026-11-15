@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ==========================================
@@ -37,6 +38,7 @@ model User {
   transactionLegs    TransactionLeg[]
   debtLedgerEntries  DebtLedgerEntry[]
   pendingReminders   PendingReminder[]
+  mediaAssets        MediaAsset[]
   appSetting         AppSetting?
 
   @@map("users")
@@ -81,7 +83,7 @@ model Vault {
   hasDenominations  Boolean  @default(false) // True for physical coins (e.g. 1000, 500, 200, 100 denominations)
   symbolMode        String   @default("INITIALS") // INITIALS, ICON, IMAGE
   iconName          String?
-  profileImageUrl   String?  // Served from /api/media/vaults/<userId>/... stored in data-server/media/vaults/<userId>/
+  profileImageUrl   String?  // Served from /api/media/vaults/<userId>/<assetId>-<slug>.<ext> stored in PostgreSQL media_assets
   colorHex          String?
   subVaultOutOfSync Boolean  @default(false) // Warning flag when sub-vault partitions drift from parent balance
   subVaultSyncNote  String?
@@ -473,4 +475,22 @@ model ExchangeRateCache {
 
   @@unique([baseCurrency, quoteCurrency])
   @@map("exchange_rate_cache")
+}
+
+// ==========================================
+// 15. USER MEDIA ASSETS (IN-DATABASE BYTEA STORAGE)
+// ==========================================
+model MediaAsset {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  fileName  String
+  mimeType  String
+  byteSize  Int
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("media_assets")
 }

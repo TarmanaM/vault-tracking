@@ -1,6 +1,6 @@
-# Data Schema & Taxonomy Blueprint (`Vault Tracking` v2.0)
+# Data Schema & Taxonomy Blueprint (`Vault Tracking` v2.1 — PostgreSQL)
 
-Dokumen ini menjadi pegangan utama Agent saat membuat schema Prisma, migrasi SQLite, atau query analitik. Referensi historis rancangan awal dapat dilihat di [`../desain-data-vault-tracking.txt`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/desain-data-vault-tracking.txt), dan keputusan arsitektur v2.0 di [`./journal/013-backlog-04-v2-architecture.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/journal/013-backlog-04-v2-architecture.md).
+Dokumen ini menjadi pegangan utama Agent saat membuat schema Prisma, migrasi PostgreSQL, atau query analitik. Referensi historis rancangan awal dapat dilihat di [`../desain-data-vault-tracking.txt`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/desain-data-vault-tracking.txt), keputusan arsitektur v2.0 di [`./journal/013-backlog-04-v2-architecture.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/journal/013-backlog-04-v2-architecture.md), dan keputusan Going Public v2.1 di [`./journal/014-backlog-05-going-public-decisions.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/journal/014-backlog-05-going-public-decisions.md).
 
 ---
 
@@ -43,7 +43,7 @@ Kategori dimiliki penuh oleh masing-masing user (di-instantiate dari `MasterCate
 3. **`exchange_rate_cache`**: Cache kurs valas global bersama (`base_currency` -> `quote_currency`, `rate`, `rate_date`, `source`, `fetched_at`).
 
 ### User-Personalized Tables (`user_id` Scoped)
-4. **`vaults`**: Daftar sumber dana milik user (`@@unique([userId, code])`), tipe `BANK`, `EWALLET`, `PHYSICAL_CASH`, `PHYSICAL_COIN`, `LIABILITY_CREDIT_LINE` (`HELD_POOL` telah dihapus). Mendukung profil visual & avatar terisolasi di `data-server/media/vaults/<userId>/...`.
+4. **`vaults`**: Daftar sumber dana milik user (`@@unique([userId, code])`), tipe `BANK`, `EWALLET`, `PHYSICAL_CASH`, `PHYSICAL_COIN`, `LIABILITY_CREDIT_LINE` (`HELD_POOL` telah dihapus). Mendukung profil visual & avatar WebP terisolasi di tabel `media_assets` (`/api/media/vaults/<id>.webp`).
 5. **`vault_sub_containers`**: Kantong / sub-vault (termasuk dukungan multi-currency & default routing).
 6. **`parties`**: Peran & kontak transaksi milik user (`@@unique([userId, code])`, termasuk `SELF` otomatis dibuat saat onboarding dan `is_debt_contact`).
 7. **`categories`**: Kategori milik user (`@@unique([userId, code])`, `template_code`, `is_system_locked`, `coa_code` tersimpan senyap).
@@ -56,5 +56,6 @@ Kategori dimiliki penuh oleh masing-masing user (di-instantiate dari `MasterCate
 14. **`debt_ledger_entries`**: Sub-buku besar `RECEIVABLE` & `PAYABLE` milik user (`user_id`).
 15. **`pending_reminders`**: Antrean pengingat/draft transaksi milik user (`user_id`).
 16. **`app_settings`**: Pengaturan personal per user (`user_id @unique`) untuk `base_currency`, `fx_sync_interval_days`, status FX sync, dan `dismissed_card_suggestions_json`.
+17. **`media_assets`**: Penyimpanan binary (`data Bytes` / PostgreSQL `bytea`) untuk avatar vault yang telah di-crop & dikompres ke WebP (`user_id`, `file_name`, `mime_type`, `byte_size`, `data`, `created_at`).
 
-*(Catatan: total 16 model Prisma mencakup `User`, `MasterCategoryTemplate`, `ExchangeRateCache`, serta 13 tabel domain/setting milik user.)*
+*(Catatan: total 17 model Prisma mencakup `User`, `MasterCategoryTemplate`, `ExchangeRateCache`, serta 14 tabel domain/setting/media milik user.)*

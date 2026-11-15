@@ -102,3 +102,14 @@ Dokumen ini mencatat status seluruh modul yang sudah dirancang maupun yang akan 
 - `[x]` **Complete Backend & UI `userId` Scoping + Neutral Taxonomy Cleanup**: Scoped all APIs, `ledgerService.js`, `fxService.js`, `subVaultService.js`, `cardPromotionService.js`, media routes, neutral 4 Spending Layers (`Fixed & Bills`, `Everyday Needs`, `Lifestyle & Wants`, `Giving & Gifts` via `spendingLayers.js`), hid `[coaCode]` prefixes in transaction dropdowns, and removed legacy `Taspen`/`HELD_POOL` references across UI.
 
 
+---
+
+## Phase 11: Backlog 05 (v2.1) — Going Public: PostgreSQL, In-DB WebP Media, Layered Architecture & Docker/Vercel (COMPLETED)
+- `[x]` **PostgreSQL & Zero-Disk Media (`MediaAsset` `bytea`)**: Switched `schema.prisma` to `provider = "postgresql"` (`DATABASE_URL` + `DIRECT_URL`), added `MediaAsset` table (`bytea` storage scoped by `userId`), removed legacy SQLite migrations and `data-server/` folder, and added client-side WebP compression (`image/webp`, quality `0.85`) in `VaultAvatarCropperSection.jsx`.
+- `[x]` **4-Layer Codebase Refactor (`src/server/`, `src/shared/`, `src/features/`)**:
+  - Created `src/server/logger.js` (structured logger with `LOG_LEVEL` & secret redaction), `src/server/db/prisma.js` (`server-only`), and `src/server/http/{errors,apiHandler}.js` (`withApiHandler` with auth, `zod` validation, `AppError`, and `requestId`).
+  - Extracted pure client-safe helpers and `zod` schemas into `src/shared/`.
+  - Extracted domain repositories and services into `src/server/modules/{auth,admin,media,categories,parties,vaults,reconcile,cards,debts,transactions,dashboard,analytics,ledger}/` and converted all 25 `src/app/api/**/route.js` handlers into thin wrappers (`<= 50` lines) with zero `console.error`.
+  - Modularized large client components/pages (`VaultProfileModal.jsx`, `CustomTransactionModal.jsx`, `app/analytics/page.js`, `app/settings/page.js`) into `src/features/{vaults,transactions,analytics,settings}/`.
+  - Enforced fail-fast `JWT_SECRET` check in production (`NODE_ENV === "production"`).
+- `[x]` **Docker, Vercel Standalone & English Documentation**: Enabled `output: "standalone"` in `next.config.mjs`, added root `Dockerfile`, `.dockerignore`, and `docker-compose.yml` (`postgres:17-alpine` + `app`), moved API verification script to `application/scripts/verify-v2-api.mjs` (`npm run verify:api`), and authored English `README.md`, `docs/DEPLOY-VERCEL.md`, `docs/DEPLOY-DOCKER.md`, and `docs/ARCHITECTURE.md`.
