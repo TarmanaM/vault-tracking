@@ -49,10 +49,14 @@ export async function getWealthJourneyAnalytics(userId, { preset = "3M", startDa
       },
       orderBy: [{ transactionDate: "asc" }, { transactionTime: "asc" }, { id: "asc" }],
     }),
-    prisma.exchangeRateHistory.findMany({
-      where: { quoteCurrency: baseCurrency },
-      orderBy: [{ rateDate: "asc" }, { id: "asc" }],
-    }),
+    prisma.exchangeRateHistory?.findMany
+      ? prisma.exchangeRateHistory
+          .findMany({
+            where: { quoteCurrency: baseCurrency },
+            orderBy: [{ rateDate: "asc" }, { id: "asc" }],
+          })
+          .catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   const rawVaults = await prisma.vault.findMany({

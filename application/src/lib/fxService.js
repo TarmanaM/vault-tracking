@@ -178,26 +178,31 @@ async function recordExchangeRateHistory({
   source = "FRANKFURTER_V2",
 }) {
   if (!baseCurrency || !quoteCurrency || !rateDate) return;
-  await prisma.exchangeRateHistory.upsert({
-    where: {
-      baseCurrency_quoteCurrency_rateDate: {
+  if (!prisma.exchangeRateHistory?.upsert) return;
+  try {
+    await prisma.exchangeRateHistory.upsert({
+      where: {
+        baseCurrency_quoteCurrency_rateDate: {
+          baseCurrency,
+          quoteCurrency,
+          rateDate,
+        },
+      },
+      update: {
+        rate,
+        source,
+      },
+      create: {
         baseCurrency,
         quoteCurrency,
         rateDate,
+        rate,
+        source,
       },
-    },
-    update: {
-      rate,
-      source,
-    },
-    create: {
-      baseCurrency,
-      quoteCurrency,
-      rateDate,
-      rate,
-      source,
-    },
-  });
+    });
+  } catch (err) {
+    console.warn("recordExchangeRateHistory skipped non-fatal error:", err.message);
+  }
 }
 
 /**
