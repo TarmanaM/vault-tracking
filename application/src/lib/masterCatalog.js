@@ -121,7 +121,7 @@ export function deriveSilentAccountingFields(defaultNature = "EXPENSE", commitme
 }
 
 /**
- * Ensure global MasterCategoryTemplate rows exist cleanly inside SQLite
+ * Ensure global MasterCategoryTemplate rows exist cleanly in PostgreSQL using a single batch insert
  */
 export async function ensureMasterTemplatesSeeded(prismaClient = prisma) {
   const existingCount = await prismaClient.masterCategoryTemplate.count();
@@ -129,38 +129,22 @@ export async function ensureMasterTemplatesSeeded(prismaClient = prisma) {
     return;
   }
 
-  for (const tpl of MASTER_CATEGORY_TEMPLATES) {
-    await prismaClient.masterCategoryTemplate.upsert({
-      where: { code: tpl.code },
-      update: {
-        moduleKey: tpl.moduleKey,
-        name: tpl.name,
-        description: tpl.description || null,
-        defaultNature: tpl.defaultNature,
-        commitmentType: tpl.commitmentType,
-        priorityTier: tpl.priorityTier,
-        countsAsConsume: Boolean(tpl.countsAsConsume),
-        coaCode: tpl.coaCode,
-        iconName: tpl.iconName || null,
-        colorHex: tpl.colorHex || null,
-        isSystemLocked: Boolean(tpl.isSystemLocked),
-        sortOrder: tpl.sortOrder || 0,
-      },
-      create: {
-        code: tpl.code,
-        moduleKey: tpl.moduleKey,
-        name: tpl.name,
-        description: tpl.description || null,
-        defaultNature: tpl.defaultNature,
-        commitmentType: tpl.commitmentType,
-        priorityTier: tpl.priorityTier,
-        countsAsConsume: Boolean(tpl.countsAsConsume),
-        coaCode: tpl.coaCode,
-        iconName: tpl.iconName || null,
-        colorHex: tpl.colorHex || null,
-        isSystemLocked: Boolean(tpl.isSystemLocked),
-        sortOrder: tpl.sortOrder || 0,
-      },
-    });
-  }
+  await prismaClient.masterCategoryTemplate.createMany({
+    data: MASTER_CATEGORY_TEMPLATES.map((tpl) => ({
+      code: tpl.code,
+      moduleKey: tpl.moduleKey,
+      name: tpl.name,
+      description: tpl.description || null,
+      defaultNature: tpl.defaultNature,
+      commitmentType: tpl.commitmentType,
+      priorityTier: tpl.priorityTier,
+      countsAsConsume: Boolean(tpl.countsAsConsume),
+      coaCode: tpl.coaCode,
+      iconName: tpl.iconName || null,
+      colorHex: tpl.colorHex || null,
+      isSystemLocked: Boolean(tpl.isSystemLocked),
+      sortOrder: tpl.sortOrder || 0,
+    })),
+    skipDuplicates: true,
+  });
 }

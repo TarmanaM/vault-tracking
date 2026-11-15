@@ -126,14 +126,19 @@ export async function applyUserOnboarding(userId, payload = {}) {
       orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
     });
 
-    const categoryByCode = {};
-    for (const tpl of masterTemplates) {
-      const cat = await tx.category.upsert({
-        where: { userId_code: { userId, code: tpl.code } },
-        update: {
-          isActive: true,
+    const templateCodes = masterTemplates.map((tpl) => tpl.code);
+    if (templateCodes.length > 0) {
+      await tx.category.updateMany({
+        where: {
+          userId,
+          code: { in: templateCodes },
+          isActive: false,
         },
-        create: {
+        data: { isActive: true },
+      });
+
+      await tx.category.createMany({
+        data: masterTemplates.map((tpl) => ({
           userId,
           code: tpl.code,
           templateCode: tpl.code,
@@ -148,10 +153,20 @@ export async function applyUserOnboarding(userId, payload = {}) {
           isSystemLocked: tpl.isSystemLocked,
           sortOrder: tpl.sortOrder,
           isActive: true,
-        },
+        })),
+        skipDuplicates: true,
       });
-      categoryByCode[cat.code] = cat;
     }
+
+    const instantiatedCategories =
+      templateCodes.length > 0
+        ? await tx.category.findMany({
+            where: { userId, code: { in: templateCodes } },
+          })
+        : [];
+    const categoryByCode = Object.fromEntries(
+      instantiatedCategories.map((cat) => [cat.code, cat])
+    );
 
     // 4. Instantiate starter Vaults idempotently & record Opening Balance if requested
     const createdVaultsByCode = {};
