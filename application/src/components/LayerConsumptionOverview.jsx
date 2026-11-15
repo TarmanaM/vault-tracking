@@ -34,34 +34,34 @@ export default function LayerConsumptionOverview({ currentMonth }) {
   const layers = [
     {
       key: "FIXED_MANDATORY",
-      title: "Mandatory (Wajib)",
+      title: "Fixed & Bills",
       amount: currentMonth.mandatoryExpense,
       icon: <LockClockOutlinedIcon sx={{ color: "#2563EB" }} />,
-      desc: "Parkir, Bensin, Tagihan Rutin",
+      desc: "Fuel, parking, utilities, subscriptions",
       color: "#2563EB",
     },
     {
       key: "VARIABLE_ESSENTIAL",
-      title: "Essential (Tidak Tetap)",
+      title: "Everyday Needs",
       amount: currentMonth.variableEssentialExpense,
       icon: <ShoppingBagOutlinedIcon sx={{ color: "#F97316" }} />,
-      desc: "Makan Utama, Servis Motor, Dokumen",
+      desc: "Groceries, daily meals, health, commuting",
       color: "#F97316",
     },
     {
       key: "DISCRETIONARY_JAJAN",
-      title: "Discretionary (Jajan)",
+      title: "Lifestyle & Wants",
       amount: currentMonth.discretionaryExpense,
       icon: <LocalCafeOutlinedIcon sx={{ color: "#D97706" }} />,
-      desc: "Kopi, Kuliner Malam, Warnet, Rokok",
+      desc: "Coffee, dining out, entertainment, hobbies",
       color: "#D97706",
     },
     {
       key: "SOCIAL_CHARITY",
-      title: "Social & Charity (Sedekah)",
+      title: "Giving & Gifts",
       amount: currentMonth.socialCharityExpense,
       icon: <VolunteerActivismOutlinedIcon sx={{ color: "#10B981" }} />,
-      desc: "Sedekah, Sumbangan, Piutang Ikhlas",
+      desc: "Charity, donations, gifts, debt write-offs",
       color: "#10B981",
     },
   ];
@@ -157,7 +157,7 @@ export default function LayerConsumptionOverview({ currentMonth }) {
                   <WarningAmberIcon sx={{ color: "#D97706" }} />
                   <Box>
                     <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#92400E" }}>
-                      Unaccounted Cash Shortage (Uang Hilang / Belum Tercatat): <MoneyValue value={currentMonth.cashShortageLost} allowTapToggle />
+                      Unaccounted Cash Shortage: <MoneyValue value={currentMonth.cashShortageLost} allowTapToggle />
                     </Typography>
                     <Typography variant="caption" sx={{ color: "#B45309" }}>
                       Click to review or resolve with backdated transactions without throwing off your ending balance.
@@ -170,7 +170,7 @@ export default function LayerConsumptionOverview({ currentMonth }) {
         )}
       </Grid>
 
-      {/* Info Popover for 3-Tier Taxonomy (Rule 11) */}
+      {/* Info Popover for 4 Spending Layers (Rule 11) */}
       <Popover
         open={Boolean(anchorEl)}
         anchorEl={anchorEl}
@@ -179,23 +179,26 @@ export default function LayerConsumptionOverview({ currentMonth }) {
         PaperProps={{ sx: { p: 2.5, maxWidth: 380, borderRadius: 2 } }}
       >
         <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>
-          3-Tier Financial Taxonomy
+          4 Spending Layers &amp; Consume Rule
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.85rem", mb: 1.5 }}>
-          Separates consumption from transfers and debts:
+          Categories organize daily expenses cleanly into four neutral layers while protecting budget accuracy:
         </Typography>
         <Stack spacing={1} sx={{ fontSize: "0.8rem" }}>
           <Box>
-            <strong>• Mandatory (Wajib):</strong> Fixed commitments that occur routinely (parking, fuel, bills).
+            <strong>• Fixed &amp; Bills:</strong> Recurring obligations (fuel, parking, rent, utilities, subscriptions).
           </Box>
           <Box>
-            <strong>• Essential (Tidak Tetap):</strong> Unavoidable variable costs (primary meals, vehicle servicing).
+            <strong>• Everyday Needs:</strong> Variable essentials (groceries, meals, health, upkeep).
           </Box>
           <Box>
-            <strong>• Discretionary (Jajan):</strong> Flexible lifestyle choices (coffee, snacks, gaming, cigarettes).
+            <strong>• Lifestyle &amp; Wants:</strong> Flexible personal spending (coffee, dining out, entertainment).
           </Box>
           <Box>
-            <strong>• Strict Consume Invariant:</strong> Talangan, Transfers, and PayLater repayments have <code>Consume = 0</code> to prevent artificial budget spikes.
+            <strong>• Giving &amp; Gifts:</strong> Charity, donations, gifts, and forgiven receivables.
+          </Box>
+          <Box>
+            <strong>• Strict Consume Invariant:</strong> Transfers, lent money, and debt repayments have <code>Consume = 0</code> to prevent artificial budget spikes.
           </Box>
         </Stack>
       </Popover>

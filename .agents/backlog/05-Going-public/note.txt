@@ -1,0 +1,23 @@
+#1
+Sekarang aku butuh untuk web app ini bisa diakses lewat internet tanpa harus aku hosting di local dan tetap biaya 0.
+
+#2
+refer #1. aku berfikir untuk deploay di vercel karena gratis. namun ada beberapa cons nya. kalau tidak salah dia tidak memberikan gratis sebuah penyimpanan file system atau data tidak akan permanen di file system.
+
+#3
+refer #2. aku berfikir untuk web app ini mulai mengadopsi clean code. setidaknya dia bisa seamles ingin pakai database apa. sebab vercel hanya menyediakan vercel postgre untuk gratis.
+
+#4
+refer #3. mungkin aku ingin web project ini di review codenya apakah bisa di optimalkan kodenya, lebih modular atau file file code jangan terlalu panjang, jika bisa di pisah dan di isolasikan logic penggunaan its bettter, dry code, penggunaan client side dan server side juga di perhatikan, lalu penggunaan log level, yaa kode yang sudah bagus untuk production
+
+#5
+refer #3. jika file system tidak bisa, mungkin better media disimpan di databse nya ?
+
+#6
+mungkin sekalian buatkan readme.md untuk repo github agar web terdokumentasi dengan baik. mungkin ada mermaid sebuah flow end to endnya. maksudku agar pembaca atau user non it atau teknis dapat paham penggunaan webnya 
+
+#7
+buatkan juga dokumen cara deploy di vercel ya berupa .md .
+
+#8
+buatkan juga sebuah dockerfile ya, mungkin suatu saat aku ingin jadikan ia image.

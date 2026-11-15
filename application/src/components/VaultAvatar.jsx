@@ -43,8 +43,6 @@ function defaultIconKeyForVault(vault) {
       return "CASH";
     case "PHYSICAL_COIN":
       return "COIN";
-    case "HELD_POOL":
-      return "WORK";
     case "LIABILITY_CREDIT_LINE":
       return "CARD";
     default:

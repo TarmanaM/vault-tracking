@@ -92,3 +92,24 @@ Dokumen ini mencatat status seluruh modul yang sudah dirancang maupun yang akan 
 - `[x]` **Transfer Target Sub-Vault & Native Valas Card Execution**: Schema migration `add_action_card_target_subcontainer` adding `ActionCard.targetSubContainerId`, plus native Valas formatting & currency-aware submission inside `SmartActionCards.jsx` and `ManageCardsModal.jsx`.
 - `[x]` **Title Autocomplete & Save-Time Persistent Suggestion (`012-title-autocomplete-card-suggestion.md`)**: Reordered `CustomTransactionModal.jsx` (Title + Category above Hero Amount & Vault) with combined `[Card]` + `[History]` autocomplete (`/api/transactions/title-suggestions`) that preserves user-typed custom amounts, plus deterministic post-save suggestion evaluation (`/api/transactions` -> `CardSuggestionModal.jsx` with `"Do You Want to Make a Card?"` / `"Link to Existing Card?"`, factual reasons, and cross-device `"Don't Ask Again"` via `AppSetting.dismissedCardSuggestionsJson` migration `add_dismissed_card_suggestions`).
 
+---
+
+## Phase 10: Backlog 04 (v2.0) — Multi-User, Onboarding & Generic Taxonomy (COMPLETED)
+- `[x]` **Schema & Master Catalog Foundation (`013-backlog-04-v2-architecture.md`)**: Updated `schema.prisma` for multi-user `userId` isolation, `User` auth/onboarding fields (`USER`/`ADMIN`, `isActive`, `mustChangePassword`), `MasterCategoryTemplate` (`master-catalog.json` seeded via `prisma/seed.js`), per-user `AppSetting`, complete `HELD_POOL`/`heldFundBalance` removal, and archived `inject-excel` scripts to root `archive/`.
+- `[x]` **Authentication & Privacy-First Admin Lifecycle (`/login`, `/force-password-change`, `/admin`)**: HTTP-only JWT cookie auth (`auth.js`, `middleware.js`), closed Admin-only user creation, live `isActive` session revocation, temporary password enforcement, and strict isolation blocking Admin from accessing other users' ledgers or uploaded media.
+- `[x]` **Onboarding Interview & Default Skip Preset (`/onboarding`)**: Guided currency, lifestyle modules, and starter vault setup (`onboardingService.js`, `/api/onboarding`, `/onboarding`) + ready-to-use default preset when skipped.
+- `[x]` **Dedicated Settings & Personalize Page (`/settings`)**: Custom category CRUD/archive & Master template quick-add (`/api/categories`, `/api/categories/[id]`, `/settings`) with `(i)` taxonomy guidance, FX/currency management, password update, and setup re-run.
+- `[x]` **Complete Backend & UI `userId` Scoping + Neutral Taxonomy Cleanup**: Scoped all APIs, `ledgerService.js`, `fxService.js`, `subVaultService.js`, `cardPromotionService.js`, media routes, neutral 4 Spending Layers (`Fixed & Bills`, `Everyday Needs`, `Lifestyle & Wants`, `Giving & Gifts` via `spendingLayers.js`), hid `[coaCode]` prefixes in transaction dropdowns, and removed legacy `Taspen`/`HELD_POOL` references across UI.
+
+
+---
+
+## Phase 11: Backlog 05 (v2.1) — Going Public: PostgreSQL, In-DB WebP Media, Layered Architecture & Docker/Vercel (COMPLETED)
+- `[x]` **PostgreSQL & Zero-Disk Media (`MediaAsset` `bytea`)**: Switched `schema.prisma` to `provider = "postgresql"` (`DATABASE_URL` + `DIRECT_URL`), added `MediaAsset` table (`bytea` storage scoped by `userId`), removed legacy SQLite migrations and `data-server/` folder, and added client-side WebP compression (`image/webp`, quality `0.85`) in `VaultAvatarCropperSection.jsx`.
+- `[x]` **4-Layer Codebase Refactor (`src/server/`, `src/shared/`, `src/features/`)**:
+  - Created `src/server/logger.js` (structured logger with `LOG_LEVEL` & secret redaction), `src/server/db/prisma.js` (`server-only`), and `src/server/http/{errors,apiHandler}.js` (`withApiHandler` with auth, `zod` validation, `AppError`, and `requestId`).
+  - Extracted pure client-safe helpers and `zod` schemas into `src/shared/`.
+  - Extracted domain repositories and services into `src/server/modules/{auth,admin,media,categories,parties,vaults,reconcile,cards,debts,transactions,dashboard,analytics,ledger}/` and converted all 25 `src/app/api/**/route.js` handlers into thin wrappers (`<= 50` lines) with zero `console.error`.
+  - Modularized large client components/pages (`VaultProfileModal.jsx`, `CustomTransactionModal.jsx`, `app/analytics/page.js`, `app/settings/page.js`) into `src/features/{vaults,transactions,analytics,settings}/`.
+  - Enforced fail-fast `JWT_SECRET` check in production (`NODE_ENV === "production"`).
+- `[x]` **Docker, Vercel Standalone & English Documentation**: Enabled `output: "standalone"` in `next.config.mjs`, added root `Dockerfile`, `.dockerignore`, and `docker-compose.yml` (`postgres:17-alpine` + `app`), moved API verification script to `application/scripts/verify-v2-api.mjs` (`npm run verify:api`), and authored English `README.md`, `docs/DEPLOY-VERCEL.md`, `docs/DEPLOY-DOCKER.md`, and `docs/ARCHITECTURE.md`.

@@ -1,0 +1,42 @@
+#1
+Sekarang karena aplikasi refer terhadap buku besar transaksi ku. jadi semua adalah personalisasi ku. 
+Maka aku ingin aplikasi ini juga bisa dipakai oleh orang lain.
+
+#2
+apakah 3 tier taxonomy ini berlaku ke semua user? aku ingin di update ini user lain bisa mudah paham dan tidak kebingungan penggunaannya.
+
+#3
+Apakah membuat sebuah fitur sesi interview Personalisasi aplikasi ke user baru itu oke ?
+misal karena sekarang aplikasi di sesuaikan dari transaksi ku, maka ada transaksi dengan kategori bensin kendaraan atau parkir. jika user tidak punya kendaraan mungkin category bensin akan redundan. dan juga card card juga yang itu berasal dari inject excel ku kan. mungkin user lain berbeda.
+dan gimana agar user bisa juga menambah kategorinya ?
+
+#4
+karena aplikasi ini akan di pakai oleh user lain atau dalam arti aplikasi akan mulai generik. maka apakah sebaiknya kita membuat sebuah table yang mana yang master dan mana yang personlisaisi
+
+#5
+refer #3 , mungkin kamu bisa buatkan dulu draft pertanyaan saat ada fitur sesi interview. mungkin ada :
+- apakah user punya kendaraan. maka ada kebutuhan bensin dan parkir
+- apa mata uang utama user pakai.
+
+kalau kamu ada rekomendasi bisa kita diskusikan.
+
+#6
+kayanya kita perlu ada fitur login agar user lain tidak bisa membuka vault tracking yang lain. dan refer ke #3 mungkin dengan adanya fitur login, lebih mudah menyimpan state interviewnya atau settingan.
+
+#7
+kenapa di category record transaction ada kode-kode seperti [xxxx] ? kayanya itu membingungkan user. aku tidak mau user diberikan tampilan yang terllau teknis
+
+#8
+sepertinya held fund pool (taspen) dihapus karena itu pure dari kebutuhannku saja. jadi tidak untuk semua user. lagi pula itu sudah tidak ada lagi didiriku. jadi dihapus saja.
+
+#9
+lalu mungkin di non aktifkan saja inject excel itu, karena itu untuk testing apakah apliaksi berjalan saat sudah ada transaksi saja.
+
+#10 
+mungkin ada preset default personalisaisi jika user ingin skip interview.
+
+#11
+refer #6. mungkin ada role user biasa dan admin. dimana dmin ada menu admin untuk mengatur akun seperti reset password,aktif/nonaktif. tapi admin tidak bisa melihat vault tracking user lain
+
+#
+tidak perlu testing browser ya. kecuali aku suruh

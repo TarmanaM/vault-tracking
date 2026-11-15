@@ -529,7 +529,7 @@ export default function ManageCardsModal({ vaults = [], categories = [], parties
                   value={newPartyId}
                   onChange={(e) => setNewPartyId(e.target.value)}
                 >
-                  <MenuItem value="">Self (Isa)</MenuItem>
+                  <MenuItem value="">Self (Personal)</MenuItem>
                   {parties
                     .filter((p) => p.code !== "SELF" && p.partyType !== "SELF")
                     .map((p) => (

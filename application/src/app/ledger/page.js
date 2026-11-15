@@ -33,6 +33,7 @@ import { toDecimal } from "@/lib/money";
 import { useLedgerStore } from "@/store/useLedgerStore";
 import MoneyValue from "@/components/MoneyValue";
 import { isTransactionPromotable } from "@/lib/cardPromotionUtils";
+import { getSpendingLayerMeta } from "@/lib/spendingLayers";
 
 const PRESET_RANGES = [
   { value: "1M", label: "1M" },
@@ -351,7 +352,10 @@ export default function LedgerPage() {
 
                         {t.category && (
                           <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                            {t.category.name} ({t.commitmentType})
+                            {t.category.name}
+                            {t.commitmentType && t.commitmentType !== "NONE"
+                              ? ` • ${getSpendingLayerMeta(t.commitmentType).label}`
+                              : ""}
                           </Typography>
                         )}
 
