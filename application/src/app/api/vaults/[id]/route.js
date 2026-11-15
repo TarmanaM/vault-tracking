@@ -3,11 +3,23 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
+const ALLOWED_VAULT_TYPES = new Set([
+  "BANK",
+  "EWALLET",
+  "PHYSICAL_CASH",
+  "PHYSICAL_COIN",
+  "LIABILITY_CREDIT_LINE",
+]);
+
 export async function PATCH(request, { params }) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const resolved = await params;
     const vaultId = parseInt(resolved?.id, 10);
     if (!vaultId) {
@@ -27,9 +39,15 @@ export async function PATCH(request, { params }) {
       sortOrder,
     } = body;
 
-    const existing = await prisma.vault.findUnique({ where: { id: vaultId } });
+    const existing = await prisma.vault.findFirst({
+      where: { id: vaultId, userId: user.id },
+    });
     if (!existing) {
       return NextResponse.json({ success: false, error: "Vault not found" }, { status: 404 });
+    }
+
+    if (vaultType !== undefined && !ALLOWED_VAULT_TYPES.has(vaultType)) {
+      return NextResponse.json({ success: false, error: "Invalid vault type" }, { status: 400 });
     }
 
     const updateData = {};
@@ -65,15 +83,27 @@ export async function PATCH(request, { params }) {
   }
 }
 
-export async function DELETE(_request, { params }) {
+export async function DELETE(request, { params }) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const resolved = await params;
     const vaultId = parseInt(resolved?.id, 10);
     if (!vaultId) {
       return NextResponse.json({ success: false, error: "Invalid vault ID" }, { status: 400 });
     }
 
-    const activeCount = await prisma.vault.count({ where: { isActive: true } });
+    const existing = await prisma.vault.findFirst({
+      where: { id: vaultId, userId: user.id },
+    });
+    if (!existing) {
+      return NextResponse.json({ success: false, error: "Vault not found" }, { status: 404 });
+    }
+
+    const activeCount = await prisma.vault.count({
+      where: { userId: user.id, isActive: true },
+    });
     if (activeCount <= 1) {
       return NextResponse.json(
         { success: false, error: "Cannot archive the last remaining active vault" },

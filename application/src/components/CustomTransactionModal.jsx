@@ -865,7 +865,7 @@ export default function CustomTransactionModal({
               {(nature === "EXPENSE" || nature === "INCOME" || nature === "PAYABLE_BORROW") && (
                 <TextField
                   select
-                  label="Category / Layer"
+                  label="Category"
                   size="small"
                   fullWidth
                   value={categoryId}
@@ -874,7 +874,7 @@ export default function CustomTransactionModal({
                   <MenuItem value="">Auto / Uncategorized</MenuItem>
                   {filteredCategories.map((c) => (
                     <MenuItem key={c.id} value={c.id}>
-                      [{c.coaCode}] {c.name}
+                      {c.name}
                     </MenuItem>
                   ))}
                 </TextField>

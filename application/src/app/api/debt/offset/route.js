@@ -2,11 +2,15 @@
 // Handles manual two-way debt merge / offset between Receivables and Payables (#22-2)
 
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth";
 import { offsetPartyDebts } from "@/lib/ledgerService";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
     const {
@@ -25,6 +29,7 @@ export async function POST(request) {
     }
 
     const result = await offsetPartyDebts({
+      userId: user.id,
       partyId,
       receivableIds,
       payableIds,

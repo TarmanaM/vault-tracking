@@ -73,10 +73,16 @@ async function rememberPartyExternalAccount(tx, party, accountNote) {
 }
 
 /**
- * Recalculate chronological running vault balances and total net wealth across all transaction legs
+ * Recalculate chronological running vault balances and total net wealth across all transaction legs for one user
  */
-export async function recalculateLedgerRunningBalances(tx) {
+export async function recalculateLedgerRunningBalances(tx, userId) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) {
+    throw new Error("userId is required to recalculate ledger running balances");
+  }
+
   const allTxs = await tx.transaction.findMany({
+    where: { userId: uid },
     include: {
       legs: { orderBy: { id: "asc" } },
       debtLedgerEntries: true,
@@ -89,7 +95,7 @@ export async function recalculateLedgerRunningBalances(tx) {
   });
 
   // Identify pre-initial-fund absorbed deltas so INITIAL_FUND stays anchored accurately
-  const vaults = await tx.vault.findMany();
+  const vaults = await tx.vault.findMany({ where: { userId: uid } });
   const initialDateByVault = {};
   for (const t of allTxs) {
     if (t.nature === "INITIAL_FUND") {
@@ -172,6 +178,7 @@ export async function recalculateLedgerRunningBalances(tx) {
  */
 async function settleDebtEntries({
   tx,
+  userId,
   transactionId,
   partyId,
   entryCategory,
@@ -183,8 +190,8 @@ async function settleDebtEntries({
   let remainingToAllocate = toDecimal(settlementAmount);
 
   if (referenceDebtId) {
-    const target = await tx.debtLedgerEntry.findUnique({
-      where: { id: parseInt(referenceDebtId, 10) },
+    const target = await tx.debtLedgerEntry.findFirst({
+      where: { id: parseInt(referenceDebtId, 10), userId },
     });
     if (!target || target.partyId !== partyId || target.entryCategory !== entryCategory) {
       throw new Error("Referenced debt entry not found for this party");
@@ -192,7 +199,7 @@ async function settleDebtEntries({
 
     const openAmt = toDecimal(target.remainingOpenAmount);
     if (remainingToAllocate.greaterThan(openAmt)) {
-      throw new Error(`Payment exceeds selected item's remaining balance (Rp ${openAmt.toFixed(0)})`);
+      throw new Error(`Payment exceeds selected item's remaining balance (${openAmt.toFixed(0)})`);
     }
 
     const newRem = subMoney(openAmt, remainingToAllocate);
@@ -206,6 +213,7 @@ async function settleDebtEntries({
 
     await tx.debtLedgerEntry.create({
       data: {
+        userId,
         transactionId,
         partyId,
         entryCategory,
@@ -224,6 +232,7 @@ async function settleDebtEntries({
   // FIFO Auto-Allocate oldest OPEN / PARTIAL items first
   const openItems = await tx.debtLedgerEntry.findMany({
     where: {
+      userId,
       partyId,
       entryCategory,
       direction: "INCREASE",
@@ -239,7 +248,7 @@ async function settleDebtEntries({
   const totalOpen = openItems.reduce((acc, item) => addMoney(acc, item.remainingOpenAmount), toDecimal(0));
   if (remainingToAllocate.greaterThan(totalOpen)) {
     throw new Error(
-      `Amount exceeds total open ${entryCategory.toLowerCase()} balance (Rp ${totalOpen.toFixed(0)})`
+      `Amount exceeds total open ${entryCategory.toLowerCase()} balance (${totalOpen.toFixed(0)})`
     );
   }
 
@@ -260,6 +269,7 @@ async function settleDebtEntries({
 
     await tx.debtLedgerEntry.create({
       data: {
+        userId,
         transactionId,
         partyId,
         entryCategory,
@@ -283,6 +293,7 @@ async function settleDebtEntries({
 export async function createTransaction(payload) {
   return await prisma.$transaction(async (tx) => {
     const {
+      userId,
       title,
       nature,
       categoryId = null,
@@ -308,11 +319,35 @@ export async function createTransaction(payload) {
       referenceDebtId = null,
     } = payload;
 
-    const appSetting = await getOrCreateAppSettings(tx);
+    const uid = parseInt(userId, 10);
+    if (!uid || Number.isNaN(uid)) {
+      throw new Error("Authenticated userId is required to create transaction");
+    }
+
+    const appSetting = await getOrCreateAppSettings(uid, tx);
     const baseCurrency = String(appSetting.baseCurrency || "IDR").toUpperCase();
 
-    const party = await tx.party.findUnique({ where: { id: parseInt(partyId, 10) } });
+    const party = await tx.party.findFirst({ where: { id: parseInt(partyId, 10), userId: uid } });
     if (!party) throw new Error(`Party with id ${partyId} not found`);
+
+    let resolvedCategory = null;
+    if (categoryId) {
+      resolvedCategory = await tx.category.findFirst({
+        where: { id: parseInt(categoryId, 10), userId: uid },
+      });
+      if (!resolvedCategory) {
+        throw new Error(`Category with id ${categoryId} not found`);
+      }
+    }
+
+    if (actionCardId) {
+      const ownedCard = await tx.actionCard.findFirst({
+        where: { id: parseInt(actionCardId, 10), userId: uid },
+      });
+      if (!ownedCard) {
+        throw new Error(`Action Card with id ${actionCardId} not found`);
+      }
+    }
 
     const needsSourceVault =
       nature !== "PAYABLE_BORROW" || payableMode === "CASH_LOAN";
@@ -320,10 +355,11 @@ export async function createTransaction(payload) {
     let sourceVault = null;
     if (needsSourceVault) {
       if (!sourceVaultId) throw new Error("Source/Destination vault is required");
-      sourceVault = await tx.vault.findUnique({ where: { id: parseInt(sourceVaultId, 10) } });
+      sourceVault = await tx.vault.findFirst({ where: { id: parseInt(sourceVaultId, 10), userId: uid } });
       if (!sourceVault) throw new Error(`Vault with id ${sourceVaultId} not found`);
     } else if (sourceVaultId) {
-      sourceVault = await tx.vault.findUnique({ where: { id: parseInt(sourceVaultId, 10) } });
+      sourceVault = await tx.vault.findFirst({ where: { id: parseInt(sourceVaultId, 10), userId: uid } });
+      if (!sourceVault) throw new Error(`Vault with id ${sourceVaultId} not found`);
     }
 
     // Resolve target Sub-Vault (defaults automatically to Vault's Default Sub-Vault if omitted)
@@ -423,14 +459,15 @@ export async function createTransaction(payload) {
     // 1. Create General Ledger Header
     const createdTx = await tx.transaction.create({
       data: {
+        userId: uid,
         transactionDate: txDate,
         transactionTime: txTime,
         monthTag,
         title,
         nature,
-        categoryId: categoryId ? parseInt(categoryId, 10) : null,
-        commitmentType,
-        priorityTier,
+        categoryId: resolvedCategory ? resolvedCategory.id : null,
+        commitmentType: resolvedCategory?.commitmentType || commitmentType,
+        priorityTier: resolvedCategory?.priorityTier || priorityTier,
         partyId: party.id,
         actionCardId: actionCardId ? parseInt(actionCardId, 10) : null,
         currency: entryCurrency,
@@ -561,6 +598,7 @@ export async function createTransaction(payload) {
         }
         await tx.transactionLeg.create({
           data: {
+            userId: uid,
             transactionId: txRef.id,
             vaultId: vaultObj.id,
             subContainerId: subObj?.id || null,
@@ -608,6 +646,7 @@ export async function createTransaction(payload) {
 
       await tx.transactionLeg.create({
         data: {
+          userId: uid,
           transactionId: txRef.id,
           vaultId: vaultObj.id,
           subContainerId: subObj?.id || null,
@@ -652,7 +691,7 @@ export async function createTransaction(payload) {
       // Coin split outflow (Cash + Coin combined payment) or coin change inflow
       if (coinUsedDec.greaterThan(0) || changeDec.greaterThan(0)) {
         const coinVault = await tx.vault.findFirst({
-          where: { OR: [{ code: "COIN" }, { vaultType: "PHYSICAL_COIN" }] },
+          where: { userId: uid, OR: [{ code: "COIN" }, { vaultType: "PHYSICAL_COIN" }] },
         });
         if (!coinVault) {
           throw new Error("COIN vault not found for coin transaction");
@@ -687,6 +726,7 @@ export async function createTransaction(payload) {
 
           await tx.transactionLeg.create({
             data: {
+              userId: uid,
               transactionId: createdTx.id,
               vaultId: coinVault.id,
               subContainerId: coinDefaultSub?.id || null,
@@ -722,6 +762,7 @@ export async function createTransaction(payload) {
 
           await tx.transactionLeg.create({
             data: {
+              userId: uid,
               transactionId: createdTx.id,
               vaultId: coinVault.id,
               subContainerId: coinDefaultSub?.id || null,
@@ -742,6 +783,7 @@ export async function createTransaction(payload) {
       if (nature === "RECEIVABLE_LEND") {
         await tx.debtLedgerEntry.create({
           data: {
+            userId: uid,
             transactionId: createdTx.id,
             partyId: party.id,
             entryCategory: "RECEIVABLE",
@@ -757,6 +799,7 @@ export async function createTransaction(payload) {
       } else if (nature === "PAYABLE_REPAY") {
         await settleDebtEntries({
           tx,
+          userId: uid,
           transactionId: createdTx.id,
           partyId: party.id,
           entryCategory: "PAYABLE",
@@ -782,6 +825,7 @@ export async function createTransaction(payload) {
       if (nature === "RECEIVABLE_COLLECT") {
         await settleDebtEntries({
           tx,
+          userId: uid,
           transactionId: createdTx.id,
           partyId: party.id,
           entryCategory: "RECEIVABLE",
@@ -807,6 +851,7 @@ export async function createTransaction(payload) {
 
       await tx.debtLedgerEntry.create({
         data: {
+          userId: uid,
           transactionId: createdTx.id,
           partyId: party.id,
           entryCategory: "PAYABLE",
@@ -821,7 +866,7 @@ export async function createTransaction(payload) {
       await recomputePartyBalances(tx, party.id);
     } else if (nature === "TRANSFER") {
       if (!targetVaultId) throw new Error("Target vault is required for TRANSFER");
-      const targetVault = await tx.vault.findUnique({ where: { id: parseInt(targetVaultId, 10) } });
+      const targetVault = await tx.vault.findFirst({ where: { id: parseInt(targetVaultId, 10), userId: uid } });
       if (!targetVault) throw new Error("Target vault not found");
 
       let targetSubContainer = null;
@@ -893,15 +938,18 @@ export async function createTransaction(payload) {
 
     // 3. Auto-Split Tax / Admin Fee into separate row if present
     if (entryTaxDec.greaterThan(0) && sourceVault) {
-      const adminCategory = await tx.category.findUnique({ where: { code: "EXP_ADMIN_TAX" } });
+      const adminCategory = await tx.category.findUnique({
+        where: { userId_code: { userId: uid, code: "EXP_ADMIN_TAX" } },
+      });
       const liveVault = await tx.vault.findUnique({ where: { id: sourceVault.id } });
 
       const childTx = await tx.transaction.create({
         data: {
+          userId: uid,
           transactionDate: txDate,
           transactionTime: txTime,
           monthTag,
-          title: `Biaya Admin/Pajak - ${title}`,
+          title: `Admin/Tax Fee - ${title}`,
           nature: "EXPENSE",
           categoryId: adminCategory ? adminCategory.id : null,
           commitmentType: "FIXED_MANDATORY",
@@ -947,8 +995,8 @@ export async function createTransaction(payload) {
       await recordCardUsage(tx, parseInt(actionCardId, 10), grossDec, sourceVault.id, txDate);
     }
 
-    // 5. Recalculate chronological running balances across ledger legs
-    await recalculateLedgerRunningBalances(tx);
+    // 5. Recalculate chronological running balances across this user's ledger legs
+    await recalculateLedgerRunningBalances(tx, uid);
 
     return createdTx;
   });
@@ -958,14 +1006,22 @@ export async function createTransaction(payload) {
  * Forgives/writes-off an unsettled receivable (full, specific partial, or party-level FIFO partial)
  */
 export async function writeOffDebt({
+  userId,
   debtEntryId = null,
   partyId = null,
   amount = null,
   destinationCategoryCode = "EXP_SOCIAL_CHARITY",
   notes = null,
 }) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) {
+    throw new Error("Authenticated userId is required");
+  }
+
   return await prisma.$transaction(async (tx) => {
-    const category = await tx.category.findUnique({ where: { code: destinationCategoryCode } });
+    const category = await tx.category.findUnique({
+      where: { userId_code: { userId: uid, code: destinationCategoryCode } },
+    });
     const now = new Date();
     const monthTag = `${now.toLocaleString("en-US", { month: "short" })},${now.getFullYear()}`;
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -974,8 +1030,8 @@ export async function writeOffDebt({
     let writeOffAmount = amount !== null && amount !== undefined && amount !== "" ? roundMoney(amount) : null;
 
     if (debtEntryId) {
-      const debt = await tx.debtLedgerEntry.findUnique({
-        where: { id: parseInt(debtEntryId, 10) },
+      const debt = await tx.debtLedgerEntry.findFirst({
+        where: { id: parseInt(debtEntryId, 10), userId: uid },
         include: { party: true },
       });
       if (!debt || toDecimal(debt.remainingOpenAmount).lessThanOrEqualTo(0)) {
@@ -991,6 +1047,7 @@ export async function writeOffDebt({
     } else if (resolvedPartyId) {
       const partyOpenRecs = await tx.debtLedgerEntry.findMany({
         where: {
+          userId: uid,
           partyId: resolvedPartyId,
           entryCategory: "RECEIVABLE",
           direction: "INCREASE",
@@ -1005,21 +1062,22 @@ export async function writeOffDebt({
         writeOffAmount = roundMoney(totalOpen);
       }
       if (writeOffAmount.lessThanOrEqualTo(0) || writeOffAmount.greaterThan(totalOpen)) {
-        throw new Error(`Write-off amount must be between Rp 1 and Rp ${totalOpen.toFixed(0)}`);
+        throw new Error(`Write-off amount must be between 1 and ${totalOpen.toFixed(0)}`);
       }
     } else {
       throw new Error("Either debtEntryId or partyId is required");
     }
 
-    const party = await tx.party.findUnique({ where: { id: resolvedPartyId } });
+    const party = await tx.party.findFirst({ where: { id: resolvedPartyId, userId: uid } });
     if (!party) throw new Error("Party not found");
 
     const writeOffTx = await tx.transaction.create({
       data: {
+        userId: uid,
         transactionDate: now,
         transactionTime: timeStr,
         monthTag,
-        title: `Ikhlaskan Piutang - ${party.name}`,
+        title: `Debt Write-Off - ${party.name}`,
         nature: "EXPENSE",
         categoryId: category ? category.id : null,
         commitmentType: category?.commitmentType || "SOCIAL_CHARITY",
@@ -1034,6 +1092,7 @@ export async function writeOffDebt({
 
     await settleDebtEntries({
       tx,
+      userId: uid,
       transactionId: writeOffTx.id,
       partyId: party.id,
       entryCategory: "RECEIVABLE",
@@ -1044,25 +1103,31 @@ export async function writeOffDebt({
     });
 
     await recomputePartyBalances(tx, party.id);
-    await recalculateLedgerRunningBalances(tx);
+    await recalculateLedgerRunningBalances(tx, uid);
 
     return writeOffTx;
   });
 }
 
 /**
- * Manually merge / offset Receivable vs Payable entries for a Party without moving cash/bank vaults (#22-2)
+ * Manually merge / offset Receivable vs Payable entries for a Party without moving cash/bank vaults
  */
 export async function offsetPartyDebts({
+  userId,
   partyId,
   receivableIds = [],
   payableIds = [],
   offsetAmount = null,
   notes = null,
 }) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) {
+    throw new Error("Authenticated userId is required");
+  }
+
   return await prisma.$transaction(async (tx) => {
     const pId = parseInt(partyId, 10);
-    const party = await tx.party.findUnique({ where: { id: pId } });
+    const party = await tx.party.findFirst({ where: { id: pId, userId: uid } });
     if (!party) throw new Error("Party not found");
     if (!party.isDebtContact && party.partyType !== "SELF") {
       await tx.party.update({
@@ -1072,6 +1137,7 @@ export async function offsetPartyDebts({
     }
 
     const recWhere = {
+      userId: uid,
       partyId: pId,
       entryCategory: "RECEIVABLE",
       direction: "INCREASE",
@@ -1080,6 +1146,7 @@ export async function offsetPartyDebts({
     };
 
     const payWhere = {
+      userId: uid,
       partyId: pId,
       entryCategory: "PAYABLE",
       direction: "INCREASE",
@@ -1114,7 +1181,7 @@ export async function offsetPartyDebts({
         : roundMoney(maxPossible);
 
     if (finalOffset.lessThanOrEqualTo(0) || finalOffset.greaterThan(maxPossible)) {
-      throw new Error(`Offset amount must be between Rp 1 and Rp ${maxPossible.toFixed(0)}`);
+      throw new Error(`Offset amount must be between 1 and ${maxPossible.toFixed(0)}`);
     }
 
     const now = new Date();
@@ -1123,10 +1190,11 @@ export async function offsetPartyDebts({
 
     const offsetTx = await tx.transaction.create({
       data: {
+        userId: uid,
         transactionDate: now,
         transactionTime: timeStr,
         monthTag,
-        title: `Offset Utang-Piutang - ${party.name}`,
+        title: `Debt Offset Merge - ${party.name}`,
         nature: "DEBT_OFFSET",
         categoryId: null,
         commitmentType: "NONE",
@@ -1135,7 +1203,7 @@ export async function offsetPartyDebts({
         grossAmount: finalOffset,
         consumeAmount: toDecimal(0),
         incomeAmount: toDecimal(0),
-        notes: notes || `Manual debt merge/offset of Rp ${finalOffset.toFixed(0)}`,
+        notes: notes || `Manual debt merge/offset of ${finalOffset.toFixed(0)}`,
       },
     });
 
@@ -1156,6 +1224,7 @@ export async function offsetPartyDebts({
       });
       await tx.debtLedgerEntry.create({
         data: {
+          userId: uid,
           transactionId: offsetTx.id,
           partyId: party.id,
           entryCategory: "RECEIVABLE",
@@ -1188,6 +1257,7 @@ export async function offsetPartyDebts({
       });
       await tx.debtLedgerEntry.create({
         data: {
+          userId: uid,
           transactionId: offsetTx.id,
           partyId: party.id,
           entryCategory: "PAYABLE",
@@ -1204,7 +1274,7 @@ export async function offsetPartyDebts({
     }
 
     await recomputePartyBalances(tx, party.id);
-    await recalculateLedgerRunningBalances(tx);
+    await recalculateLedgerRunningBalances(tx, uid);
 
     return offsetTx;
   });
@@ -1213,14 +1283,19 @@ export async function offsetPartyDebts({
 /**
  * Reverse & delete a transaction atomically (used by 5s Undo & Ledger Delete)
  */
-export async function deleteAndReverseTransaction(txId) {
+export async function deleteAndReverseTransaction(txId, userId) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) {
+    throw new Error("Authenticated userId is required");
+  }
+
   return await prisma.$transaction(async (tx) => {
     const id = parseInt(txId, 10);
-    const settings = await getOrCreateAppSettings(tx);
+    const settings = await getOrCreateAppSettings(uid, tx);
     const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
 
-    const transaction = await tx.transaction.findUnique({
-      where: { id },
+    const transaction = await tx.transaction.findFirst({
+      where: { id, userId: uid },
       include: {
         legs: true,
         childTransactions: { include: { legs: true } },
@@ -1276,7 +1351,9 @@ export async function deleteAndReverseTransaction(txId) {
       }
     } else if (transaction.linkedCheckpointId) {
       // Revert backdated checkpoint deduction tracking if possible
-      const cp = await tx.vaultCheckpoint.findUnique({ where: { id: transaction.linkedCheckpointId } });
+      const cp = await tx.vaultCheckpoint.findFirst({
+        where: { id: transaction.linkedCheckpointId, userId: uid },
+      });
       if (cp) {
         const primaryLeg = transaction.legs.find((l) => l.legRole === "PRIMARY");
         const absAmt = primaryLeg ? toDecimal(primaryLeg.netMutation).abs() : toDecimal(transaction.grossAmount);
@@ -1296,7 +1373,9 @@ export async function deleteAndReverseTransaction(txId) {
     for (const de of transaction.debtLedgerEntries) {
       affectedPartyIds.add(de.partyId);
       if (de.direction === "DECREASE" && de.referenceDebtId) {
-        const orig = await tx.debtLedgerEntry.findUnique({ where: { id: de.referenceDebtId } });
+        const orig = await tx.debtLedgerEntry.findFirst({
+          where: { id: de.referenceDebtId, userId: uid },
+        });
         if (orig) {
           const restoredOpen = addMoney(orig.remainingOpenAmount, de.amount);
           const fullOrig = toDecimal(orig.amount);
@@ -1323,7 +1402,7 @@ export async function deleteAndReverseTransaction(txId) {
       await evaluateBasePartitionState(tx, vId, baseCurrency);
     }
 
-    await recalculateLedgerRunningBalances(tx);
+    await recalculateLedgerRunningBalances(tx, uid);
 
     return { id: transaction.id, title: transaction.title };
   });

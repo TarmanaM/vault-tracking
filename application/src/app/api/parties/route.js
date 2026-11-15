@@ -3,13 +3,17 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const parties = await prisma.party.findMany({
-      where: { isActive: true },
+      where: { userId: user.id, isActive: true },
       orderBy: { id: "asc" },
     });
     return NextResponse.json({ success: true, data: parties });
@@ -22,6 +26,9 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
     const {
@@ -43,9 +50,11 @@ export async function POST(request) {
       .replace(/^_|_$/g, "")
       .slice(0, 20);
 
-    // Ensure unique party code
+    // Ensure unique party code per user
     let code = baseCode || `PARTY_${Date.now()}`;
-    const existing = await prisma.party.findUnique({ where: { code } });
+    const existing = await prisma.party.findUnique({
+      where: { userId_code: { userId: user.id, code } },
+    });
     if (existing) {
       code = `${baseCode}_${Date.now().toString().slice(-4)}`;
     }
@@ -55,6 +64,7 @@ export async function POST(request) {
 
     const created = await prisma.party.create({
       data: {
+        userId: user.id,
         code,
         name: cleanName,
         partyType,

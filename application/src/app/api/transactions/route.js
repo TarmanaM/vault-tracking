@@ -3,12 +3,16 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { createTransaction } from "@/lib/ledgerService";
 import { evaluatePostSaveCardSuggestion } from "@/lib/cardPromotionService";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const { searchParams } = new URL(request.url);
     const vaultId = searchParams.get("vaultId");
@@ -23,8 +27,9 @@ export async function GET(request) {
     const limit = parseInt(searchParams.get("limit") || "100", 10);
     const offset = parseInt(searchParams.get("offset") || "0", 10);
 
-    // Determine date bounds anchored to latest transaction when using relative presets (#xx)
+    // Determine date bounds anchored to this user's latest transaction when using relative presets
     const latestTx = await prisma.transaction.findFirst({
+      where: { userId: user.id },
       orderBy: [{ transactionDate: "desc" }, { id: "desc" }],
       select: { transactionDate: true },
     });
@@ -52,7 +57,7 @@ export async function GET(request) {
       if (endDateParam) resolvedEnd = new Date(`${endDateParam}T23:59:59.999`);
     }
 
-    const where = {};
+    const where = { userId: user.id };
     if (categoryId) where.categoryId = parseInt(categoryId, 10);
     if (partyId) where.partyId = parseInt(partyId, 10);
     if (nature) where.nature = nature;
@@ -121,14 +126,17 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
-    const result = await createTransaction(body);
+    const result = await createTransaction({ ...body, userId: user.id });
 
     let cardSuggestion = null;
     if (!body?.actionCardId && result?.id) {
       try {
-        cardSuggestion = await evaluatePostSaveCardSuggestion(result.id);
+        cardSuggestion = await evaluatePostSaveCardSuggestion(user.id, result.id);
       } catch (suggestErr) {
         console.error("Post-save card suggestion evaluation warning:", suggestErr);
       }

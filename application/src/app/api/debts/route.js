@@ -1,16 +1,20 @@
 // API Route: GET /api/debts
-// Returns separate receivables (Piutang), payables (Utang), held funds, and open entries per party (#22-2)
+// Returns separate receivables and payables plus open entries per party for the authenticated user
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { toDecimal, addMoney, roundMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const parties = await prisma.party.findMany({
-      where: { isActive: true },
+      where: { userId: user.id, isActive: true },
       include: {
         debtLedgerEntries: {
           include: {
@@ -24,14 +28,13 @@ export async function GET() {
       orderBy: [{ receivableBalance: "desc" }, { payableBalance: "desc" }, { name: "asc" }],
     });
 
-    // Also include LIABILITY_CREDIT_LINE vaults (e.g. SPayLater) in payables overview
+    // Also include LIABILITY_CREDIT_LINE vaults (e.g. PayLater) in payables overview
     const liabilityVaults = await prisma.vault.findMany({
-      where: { isActive: true, vaultType: "LIABILITY_CREDIT_LINE" },
+      where: { userId: user.id, isActive: true, vaultType: "LIABILITY_CREDIT_LINE" },
     });
 
     let totalReceivables = toDecimal(0);
     let totalPayables = toDecimal(0);
-    let totalHeldFunds = toDecimal(0);
 
     for (const v of liabilityVaults) {
       const bal = toDecimal(v.currentBalance);
@@ -44,20 +47,15 @@ export async function GET() {
     for (const p of parties) {
       const rec = toDecimal(p.receivableBalance);
       const pay = toDecimal(p.payableBalance);
-      const held = toDecimal(p.heldFundBalance);
 
       totalReceivables = addMoney(totalReceivables, rec);
       totalPayables = addMoney(totalPayables, pay);
-      if (held.greaterThan(0)) {
-        totalHeldFunds = addMoney(totalHeldFunds, held);
-      }
 
       const isSelf = p.code === "SELF" || p.partyType === "SELF";
       const hasDebtRelevance =
         Boolean(p.isDebtContact) ||
         rec.greaterThan(0) ||
         pay.greaterThan(0) ||
-        held.greaterThan(0) ||
         (p.debtLedgerEntries && p.debtLedgerEntries.length > 0);
 
       if (isSelf || !hasDebtRelevance) {
@@ -85,7 +83,6 @@ export async function GET() {
         summary: {
           totalReceivables: roundMoney(totalReceivables),
           totalPayables: roundMoney(totalPayables),
-          totalHeldFunds: roundMoney(totalHeldFunds),
         },
         parties: enrichedParties,
       },

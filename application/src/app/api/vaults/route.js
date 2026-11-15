@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { toDecimal, roundMoney } from "@/lib/money";
 import { getOrCreateAppSettings, getCachedRateMap } from "@/lib/fxService";
 import {
@@ -20,7 +21,6 @@ const ALLOWED_VAULT_TYPES = new Set([
   "EWALLET",
   "PHYSICAL_CASH",
   "PHYSICAL_COIN",
-  "HELD_POOL",
   "LIABILITY_CREDIT_LINE",
 ]);
 
@@ -33,13 +33,16 @@ function slugCode(text, fallback = "VAULT") {
   return clean || fallback;
 }
 
-export async function GET() {
+export async function GET(request) {
   try {
-    const settings = await getOrCreateAppSettings();
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
+    const settings = await getOrCreateAppSettings(user.id);
     const [rateMap, rawVaults] = await Promise.all([
       getCachedRateMap(settings.baseCurrency),
       prisma.vault.findMany({
-        where: { isActive: true },
+        where: { userId: user.id, isActive: true },
         include: {
           subContainers: {
             orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
@@ -74,6 +77,9 @@ export async function GET() {
 
 export async function POST(request) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
     const {
       name,
@@ -95,17 +101,24 @@ export async function POST(request) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const settings = await getOrCreateAppSettings(tx);
+      const settings = await getOrCreateAppSettings(user.id, tx);
       const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
 
       const baseSlug = slugCode(name, "VAULT");
       let uniqueCode = baseSlug;
       let suffix = 2;
-      while (await tx.vault.findUnique({ where: { code: uniqueCode } })) {
+      while (
+        await tx.vault.findUnique({
+          where: { userId_code: { userId: user.id, code: uniqueCode } },
+        })
+      ) {
         uniqueCode = `${baseSlug}_${suffix++}`;
       }
 
-      const maxSort = await tx.vault.aggregate({ _max: { sortOrder: true } });
+      const maxSort = await tx.vault.aggregate({
+        where: { userId: user.id },
+        _max: { sortOrder: true },
+      });
       const nextSort = (maxSort._max.sortOrder || 0) + 10;
 
       const validSubsInput = Array.isArray(subVaults)
@@ -115,6 +128,7 @@ export async function POST(request) {
       const initialDec = roundMoney(initialBalance || 0);
       const createdVault = await tx.vault.create({
         data: {
+          userId: user.id,
           code: uniqueCode,
           name: name.trim(),
           vaultType,
@@ -173,7 +187,7 @@ export async function POST(request) {
             defaultBaseSubId = sc.id;
           }
         }
-        await ensureDefaultSubContainer(tx, createdVault.id);
+        await ensureDefaultSubContainer(tx, createdVault.id, baseCurrency);
       }
 
       // Record an INITIAL_FUND ledger entry when starting base balance > 0 so wealth timeline matches
@@ -181,11 +195,25 @@ export async function POST(request) {
         const now = new Date();
         const monthTag = `${now.toLocaleString("en-US", { month: "short" })},${now.getFullYear()}`;
         const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-        const selfParty = await tx.party.findFirst({ where: { partyType: "SELF" } });
-        const initCategory = await tx.category.findUnique({ where: { code: "SYS_INITIAL_FUND" } });
+        let selfParty = await tx.party.findFirst({ where: { userId: user.id, partyType: "SELF" } });
+        if (!selfParty) {
+          selfParty = await tx.party.create({
+            data: {
+              userId: user.id,
+              code: "SELF",
+              name: user.fullName || user.username || "Me",
+              partyType: "SELF",
+              isActive: true,
+            },
+          });
+        }
+        const initCategory = await tx.category.findUnique({
+          where: { userId_code: { userId: user.id, code: "SYS_INITIAL_FUND" } },
+        });
 
         const cp = await tx.vaultCheckpoint.create({
           data: {
+            userId: user.id,
             vaultId: createdVault.id,
             checkpointTimestamp: now,
             checkpointDate: now,
@@ -202,15 +230,16 @@ export async function POST(request) {
 
         const initTx = await tx.transaction.create({
           data: {
+            userId: user.id,
             transactionDate: now,
             transactionTime: timeStr,
             monthTag,
-            title: `Dana Awal - ${createdVault.name}`,
+            title: `Initial Balance - ${createdVault.name}`,
             nature: "INITIAL_FUND",
             categoryId: initCategory ? initCategory.id : null,
             commitmentType: "NONE",
             priorityTier: "NONE",
-            partyId: selfParty ? selfParty.id : 1,
+            partyId: selfParty.id,
             linkedCheckpointId: cp.id,
             currency: baseCurrency,
             fxRateApplied: toDecimal(1),
@@ -252,7 +281,7 @@ export async function POST(request) {
           }
         }
 
-        await recalculateLedgerRunningBalances(tx);
+        await recalculateLedgerRunningBalances(tx, user.id);
       }
 
       return await tx.vault.findUnique({

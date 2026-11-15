@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { toDecimal } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +14,33 @@ function parseOptionalInt(value) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-export async function GET() {
+async function assertCardForeignKeyOwnership(tx, userId, ids) {
+  const { defaultVaultId, targetVaultId, defaultCategoryId, defaultPartyId } = ids;
+  if (defaultVaultId) {
+    const v = await tx.vault.findFirst({ where: { id: defaultVaultId, userId } });
+    if (!v) throw new Error("Selected default vault not found");
+  }
+  if (targetVaultId) {
+    const tv = await tx.vault.findFirst({ where: { id: targetVaultId, userId } });
+    if (!tv) throw new Error("Selected target vault not found");
+  }
+  if (defaultCategoryId) {
+    const c = await tx.category.findFirst({ where: { id: defaultCategoryId, userId } });
+    if (!c) throw new Error("Selected category not found");
+  }
+  if (defaultPartyId) {
+    const p = await tx.party.findFirst({ where: { id: defaultPartyId, userId } });
+    if (!p) throw new Error("Selected party not found");
+  }
+}
+
+export async function GET(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const cards = await prisma.actionCard.findMany({
-      where: { isActive: true },
+      where: { userId: user.id, isActive: true },
       include: {
         defaultVault: true,
         defaultSubContainer: true,
@@ -38,6 +62,9 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
     const {
@@ -61,18 +88,31 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Card title is required" }, { status: 400 });
     }
 
+    const parsedDefaultVaultId = parseOptionalInt(defaultVaultId);
+    const parsedTargetVaultId = parseOptionalInt(targetVaultId);
+    const parsedDefaultCategoryId = parseOptionalInt(defaultCategoryId);
+    const parsedDefaultPartyId = parseOptionalInt(defaultPartyId);
+
     const created = await prisma.$transaction(async (tx) => {
+      await assertCardForeignKeyOwnership(tx, user.id, {
+        defaultVaultId: parsedDefaultVaultId,
+        targetVaultId: parsedTargetVaultId,
+        defaultCategoryId: parsedDefaultCategoryId,
+        defaultPartyId: parsedDefaultPartyId,
+      });
+
       const card = await tx.actionCard.create({
         data: {
+          userId: user.id,
           title: title.trim(),
           subtitle: subtitle?.trim() || null,
           cardActionType,
-          defaultVaultId: parseOptionalInt(defaultVaultId),
+          defaultVaultId: parsedDefaultVaultId,
           defaultSubContainerId: parseOptionalInt(defaultSubContainerId),
-          targetVaultId: parseOptionalInt(targetVaultId),
+          targetVaultId: parsedTargetVaultId,
           targetSubContainerId: parseOptionalInt(targetSubContainerId),
-          defaultCategoryId: parseOptionalInt(defaultCategoryId),
-          defaultPartyId: parseOptionalInt(defaultPartyId),
+          defaultCategoryId: parsedDefaultCategoryId,
+          defaultPartyId: parsedDefaultPartyId,
           defaultAmount: defaultAmount ? toDecimal(defaultAmount) : null,
           quickAmountsJson: Array.isArray(quickAmounts) && quickAmounts.length > 0 ? JSON.stringify(quickAmounts) : null,
           expectedCadence,
@@ -105,6 +145,9 @@ export async function POST(request) {
 }
 
 export async function PATCH(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
     const {
@@ -128,6 +171,13 @@ export async function PATCH(request) {
       return NextResponse.json({ success: false, error: "Card id is required" }, { status: 400 });
     }
 
+    const existingCard = await prisma.actionCard.findFirst({
+      where: { id: parseInt(id, 10), userId: user.id },
+    });
+    if (!existingCard) {
+      return NextResponse.json({ success: false, error: "Action card not found" }, { status: 404 });
+    }
+
     const updateData = {};
     if (visibilityMode && ["ACTIVE", "SOFT_HIDDEN", "ARCHIVED"].includes(visibilityMode)) {
       updateData.visibilityMode = visibilityMode;
@@ -148,8 +198,15 @@ export async function PATCH(request) {
         Array.isArray(quickAmounts) && quickAmounts.length > 0 ? JSON.stringify(quickAmounts) : null;
     }
 
+    await assertCardForeignKeyOwnership(prisma, user.id, {
+      defaultVaultId: updateData.defaultVaultId,
+      targetVaultId: updateData.targetVaultId,
+      defaultCategoryId: updateData.defaultCategoryId,
+      defaultPartyId: updateData.defaultPartyId,
+    });
+
     const updated = await prisma.actionCard.update({
-      where: { id: parseInt(id, 10) },
+      where: { id: existingCard.id },
       data: updateData,
     });
 

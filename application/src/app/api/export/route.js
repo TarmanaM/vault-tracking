@@ -1,33 +1,43 @@
 // API Route: GET /api/export
-// Generates Standard Double-Entry Accounting Journal and Flat Ledger exports in CSV or TXT
+// Generates Standard Double-Entry Accounting Journal and Flat Ledger exports in CSV for the authenticated user
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { toDecimal, roundMoney } from "@/lib/money";
+import { requireUser } from "@/lib/auth";
+import { getOrCreateAppSettings } from "@/lib/fxService";
+import { toDecimal } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const { searchParams } = new URL(request.url);
-    const format = searchParams.get("format") || "journal_csv"; // journal_csv, flat_csv, journal_txt
+    const format = searchParams.get("format") || "journal_csv"; // journal_csv, flat_csv
     const monthTag = searchParams.get("monthTag");
 
-    const where = {};
+    const where = { userId: user.id };
     if (monthTag) where.monthTag = monthTag;
 
-    const transactions = await prisma.transaction.findMany({
-      where,
-      include: {
-        category: true,
-        party: true,
-        legs: { include: { vault: true } },
-      },
-      orderBy: [{ transactionDate: "asc" }, { id: "asc" }],
-    });
+    const [settings, transactions] = await Promise.all([
+      getOrCreateAppSettings(user.id, prisma),
+      prisma.transaction.findMany({
+        where,
+        include: {
+          category: true,
+          party: true,
+          legs: { include: { vault: true } },
+        },
+        orderBy: [{ transactionDate: "asc" }, { id: "asc" }],
+      }),
+    ]);
+
+    const baseCcy = String(settings?.baseCurrency || "IDR").toUpperCase();
 
     if (format === "journal_csv") {
-      let csv = "Journal No,Date,Time,COA Code,Account Name,Party/Sub-Ledger,Debit (IDR),Credit (IDR),Description\n";
+      let csv = `Journal No,Date,Time,COA Code,Account Name,Party/Sub-Ledger,Debit (${baseCcy}),Credit (${baseCcy}),Description\n`;
 
       for (const t of transactions) {
         const jNo = `JRN-${t.id}`;
@@ -37,43 +47,33 @@ export async function GET(request) {
         const vault = primaryLeg?.vault;
 
         if (t.nature === "EXPENSE") {
-          // Debit: Expense Account (Category)
           const expCoa = t.category?.coaCode || "5000";
-          const expName = t.category?.name || "Beban Pengeluaran";
+          const expName = t.category?.name || "Operating Expense";
           csv += `"${jNo}","${dateStr}","${t.transactionTime}","${expCoa}","${expName}","${t.party.name}",${gross},0,"${t.title}"\n`;
 
-          // Credit: Vault Account (Asset)
           const vCoa = vault?.vaultType === "BANK" ? "1110" : "1100";
-          const vName = vault?.name || "Kas/Bank";
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","${vCoa}","${vName}","${t.party.name}",0,${gross},"${t.title} [Keluar dari ${vName}]"\n`;
+          const vName = vault?.name || "Cash / Bank";
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","${vCoa}","${vName}","${t.party.name}",0,${gross},"${t.title} [Outflow from ${vName}]"\n`;
         } else if (t.nature === "INCOME") {
-          // Debit: Vault Account (Asset)
           const vCoa = vault?.vaultType === "BANK" ? "1110" : "1100";
-          const vName = vault?.name || "Kas/Bank";
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","${vCoa}","${vName}","${t.party.name}",${gross},0,"${t.title} [Masuk ke ${vName}]"\n`;
+          const vName = vault?.name || "Cash / Bank";
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","${vCoa}","${vName}","${t.party.name}",${gross},0,"${t.title} [Inflow to ${vName}]"\n`;
 
-          // Credit: Revenue Account
           const revCoa = t.category?.coaCode || "4000";
-          const revName = t.category?.name || "Pendapatan";
+          const revName = t.category?.name || "Income";
           csv += `"${jNo}","${dateStr}","${t.transactionTime}","${revCoa}","${revName}","${t.party.name}",0,${gross},"${t.title}"\n`;
         } else if (t.nature === "TRANSFER") {
           const targetLeg = t.legs.find((l) => l.legRole === "TRANSFER_TARGET");
           const targetVault = targetLeg?.vault;
 
-          // Debit: Target Vault
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${targetVault?.name || "Kas/Bank"}","${t.party.name}",${gross},0,"Pindah dana dari ${vault?.name}"\n`;
-          // Credit: Source Vault
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${vault?.name || "Kas/Bank"}","${t.party.name}",0,${gross},"Pindah dana ke ${targetVault?.name}"\n`;
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${targetVault?.name || "Cash / Bank"}","${t.party.name}",${gross},0,"Transfer from ${vault?.name || "Source"}"\n`;
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${vault?.name || "Cash / Bank"}","${t.party.name}",0,${gross},"Transfer to ${targetVault?.name || "Target"}"\n`;
         } else if (t.nature === "RECEIVABLE_LEND") {
-          // Debit: Receivable Account
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1201","Piutang Pihak Ketiga","${t.party.name}",${gross},0,"Pinjaman/Talangan: ${t.title}"\n`;
-          // Credit: Vault Account
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${vault?.name || "Kas/Bank"}","${t.party.name}",0,${gross},"Keluar dari ${vault?.name}"\n`;
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1201","Accounts Receivable","${t.party.name}",${gross},0,"Receivable / Lend: ${t.title}"\n`;
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${vault?.name || "Cash / Bank"}","${t.party.name}",0,${gross},"Outflow from ${vault?.name || "Source"}"\n`;
         } else if (t.nature === "RECEIVABLE_COLLECT") {
-          // Debit: Vault Account
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${vault?.name || "Kas/Bank"}","${t.party.name}",${gross},0,"Terima pelunasan piutang: ${t.title}"\n`;
-          // Credit: Receivable Account
-          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1201","Piutang Pihak Ketiga","${t.party.name}",0,${gross},"Pelunasan dari ${t.party.name}"\n`;
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1100","${vault?.name || "Cash / Bank"}","${t.party.name}",${gross},0,"Receivable Collected: ${t.title}"\n`;
+          csv += `"${jNo}","${dateStr}","${t.transactionTime}","1201","Accounts Receivable","${t.party.name}",0,${gross},"Repayment from ${t.party.name}"\n`;
         }
       }
 

@@ -2,11 +2,15 @@
 // Uploads cropped vault profile images to centralized data-server/media/vaults/
 
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth";
 import { saveVaultProfileImage } from "@/lib/mediaStorage";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const contentType = request.headers.get("content-type") || "";
     let buffer = null;
@@ -43,7 +47,7 @@ export async function POST(request) {
       buffer = Buffer.from(match[2], "base64");
     }
 
-    const url = await saveVaultProfileImage({ buffer, mimeType, vaultSlug });
+    const url = await saveVaultProfileImage({ userId: user.id, buffer, mimeType, vaultSlug });
 
     return NextResponse.json({
       success: true,

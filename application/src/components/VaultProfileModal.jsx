@@ -43,7 +43,6 @@ const VAULT_TYPES = [
   { value: "EWALLET", label: "E-Wallet / Digital" },
   { value: "PHYSICAL_CASH", label: "Physical Cash" },
   { value: "PHYSICAL_COIN", label: "Physical Coin" },
-  { value: "HELD_POOL", label: "Held / Pooled Fund" },
   { value: "LIABILITY_CREDIT_LINE", label: "Credit Line / PayLater" },
 ];
 

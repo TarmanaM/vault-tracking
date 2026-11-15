@@ -4,6 +4,8 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
+import { getSpendingLayerMeta } from "@/lib/masterCatalog";
 import { toDecimal, addMoney, subMoney, roundMoney } from "@/lib/money";
 import {
   ensureFxRatesSyncedIfDue,
@@ -38,6 +40,9 @@ function computeLinearRegression(points) {
 
 export async function GET(request) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const { searchParams } = new URL(request.url);
     const targetType = searchParams.get("type"); // WEALTH_JOURNEY, CARD, VAULT, LAYER, PARTY
     const targetId = searchParams.get("id");
@@ -53,13 +58,14 @@ export async function GET(request) {
     // 1. WEALTH JOURNEY, WATERFALL, CONSUMPTION TRENDS & VAULT FREQUENCY
     // ====================================================================
     if (targetType === "WEALTH_JOURNEY") {
-      await ensureFxRatesSyncedIfDue();
-      const appSettings = await getOrCreateAppSettings();
+      await ensureFxRatesSyncedIfDue(user.id);
+      const appSettings = await getOrCreateAppSettings(user.id);
       const baseCurrency = String(appSettings.baseCurrency || "IDR").toUpperCase();
       const rateMap = await getCachedRateMap(baseCurrency);
 
       // Load full chronological transactions to build exact running net wealth & comparison baseline
       const allTxs = await prisma.transaction.findMany({
+        where: { userId: user.id },
         include: {
           legs: { include: { vault: true } },
           debtLedgerEntries: true,
@@ -70,7 +76,7 @@ export async function GET(request) {
       });
 
       const rawVaults = await prisma.vault.findMany({
-        where: { isActive: true },
+        where: { userId: user.id, isActive: true },
         include: {
           subContainers: {
             orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
@@ -89,7 +95,7 @@ export async function GET(request) {
       });
 
       const parties = await prisma.party.findMany({
-        where: { isActive: true },
+        where: { userId: user.id, isActive: true },
       });
 
       // Resolve date bounds anchored on latest transaction date (#xx)
@@ -154,7 +160,6 @@ export async function GET(request) {
 
       // Live aggregate totals from database tables
       let liquidTotal = toDecimal(0);
-      let heldPoolTotal = toDecimal(0);
       let liabilityVaultPayable = toDecimal(0);
       const wealthDistributionPie = [];
       let paletteIdx = 0;
@@ -165,8 +170,6 @@ export async function GET(request) {
         const balNum = balDec.toNumber();
         if (v.vaultType === "LIABILITY_CREDIT_LINE") {
           if (balDec.lessThan(0)) liabilityVaultPayable = addMoney(liabilityVaultPayable, balDec.abs());
-        } else if (v.vaultType === "HELD_POOL") {
-          heldPoolTotal = addMoney(heldPoolTotal, balDec);
         } else {
           liquidTotal = addMoney(liquidTotal, balDec);
         }
@@ -194,14 +197,14 @@ export async function GET(request) {
       if (recNum > 0) {
         wealthDistributionPie.push({
           id: paletteIdx,
-          label: "Piutang Teman / Pihak Ketiga",
+          label: "Third-Party Receivables",
           value: recNum,
           color: "#38BDF8",
         });
       }
 
       const netTotalWealthDec = subMoney(
-        addMoney(addMoney(liquidTotal, heldPoolTotal), totalReceivables),
+        addMoney(liquidTotal, totalReceivables),
         totalPayables
       );
       const netTotalWealthNum = roundMoney(netTotalWealthDec).toNumber();
@@ -429,7 +432,7 @@ export async function GET(request) {
           vaultFrequency,
           wealthComparison,
           wealthDistributionPie,
-          totalLiquid: roundMoney(addMoney(liquidTotal, heldPoolTotal)),
+          totalLiquid: roundMoney(liquidTotal),
           totalReceivables: roundMoney(totalReceivables),
           totalPayables: roundMoney(totalPayables),
           netTotalWealth: roundMoney(netTotalWealthDec),
@@ -448,14 +451,14 @@ export async function GET(request) {
     // ==========================================
     if (targetType === "CARD") {
       const cardId = parseInt(targetId, 10);
-      const card = await prisma.actionCard.findUnique({
-        where: { id: cardId },
+      const card = await prisma.actionCard.findFirst({
+        where: { id: cardId, userId: user.id },
         include: { habitStats: true, defaultVault: true, defaultCategory: true },
       });
       if (!card) return NextResponse.json({ success: false, error: "Card not found" }, { status: 404 });
 
       const txs = await prisma.transaction.findMany({
-        where: { actionCardId: card.id },
+        where: { userId: user.id, actionCardId: card.id },
         orderBy: { transactionDate: "asc" },
         take: 50,
       });
@@ -491,11 +494,11 @@ export async function GET(request) {
     // ==========================================
     if (targetType === "VAULT") {
       const vaultId = parseInt(targetId, 10);
-      const settings = await getOrCreateAppSettings();
+      const settings = await getOrCreateAppSettings(user.id);
       const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
       const rateMap = await getCachedRateMap(baseCurrency);
-      const vault = await prisma.vault.findUnique({
-        where: { id: vaultId },
+      const vault = await prisma.vault.findFirst({
+        where: { id: vaultId, userId: user.id },
         include: {
           subContainers: {
             orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
@@ -507,7 +510,7 @@ export async function GET(request) {
       const partitionSummary = computeVaultPartitionSummary(vault, baseCurrency, rateMap);
 
       const legs = await prisma.transactionLeg.findMany({
-        where: { vaultId: vault.id },
+        where: { vaultId: vault.id, transaction: { userId: user.id } },
         include: { transaction: true },
         orderBy: [{ transaction: { transactionDate: "asc" } }, { id: "asc" }],
         take: 30,
@@ -542,15 +545,15 @@ export async function GET(request) {
       const txs = await prisma.transaction.findMany({
         where:
           commitmentType === "RECONCILIATION_LOST"
-            ? { nature: "RECONCILIATION_LOST" }
-            : { commitmentType },
+            ? { userId: user.id, nature: "RECONCILIATION_LOST" }
+            : { userId: user.id, commitmentType },
         include: { category: true },
         orderBy: { transactionDate: "asc" },
       });
 
       const categoryMap = {};
       for (const t of txs) {
-        const catName = t.category?.name || "Lainnya";
+        const catName = t.category?.name || "Other";
         const amt = toDecimal(t.grossAmount).toNumber();
         categoryMap[catName] = (categoryMap[catName] || 0) + amt;
       }
@@ -567,10 +570,16 @@ export async function GET(request) {
         title: t.title,
       }));
 
+      const layerMeta = getSpendingLayerMeta(commitmentType);
+      const layerTitle =
+        commitmentType === "RECONCILIATION_LOST"
+          ? "Unrecorded Cash Shortage"
+          : `${layerMeta.label} Breakdown`;
+
       return NextResponse.json({
         success: true,
         data: {
-          title: `Layer ${commitmentType.replace(/_/g, " ")}`,
+          title: layerTitle,
           pieData,
           timeSeries,
         },
@@ -582,8 +591,8 @@ export async function GET(request) {
     // ==========================================
     if (targetType === "PARTY") {
       const partyId = parseInt(targetId, 10);
-      const party = await prisma.party.findUnique({
-        where: { id: partyId },
+      const party = await prisma.party.findFirst({
+        where: { id: partyId, userId: user.id },
         include: {
           debtLedgerEntries: {
             include: { transaction: true },

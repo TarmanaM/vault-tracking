@@ -1,5 +1,5 @@
-// Local disk media storage helper for vault profile pictures and receipts
-// Persists files in data-server/media/ outside Next.js build artifacts so runtime uploads work in npm run start
+// Local disk media storage helper for per-user vault profile pictures and receipts
+// Persists files in data-server/media/ outside Next.js build artifacts with strict userId path isolation
 
 import fs from "fs/promises";
 import path from "path";
@@ -45,9 +45,13 @@ export async function resolveMediaRoot() {
 }
 
 /**
- * Persist an uploaded or canvas-cropped vault image into data-server/media/vaults/
+ * Persist an uploaded or canvas-cropped vault image into data-server/media/vaults/<userId>/
  */
-export async function saveVaultProfileImage({ buffer, mimeType, vaultSlug = "vault" }) {
+export async function saveVaultProfileImage({ userId, buffer, mimeType, vaultSlug = "vault" }) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) {
+    throw new Error("Authenticated userId is required for vault media upload");
+  }
   if (!buffer || buffer.length === 0) {
     throw new Error("Image payload is empty");
   }
@@ -62,29 +66,32 @@ export async function saveVaultProfileImage({ buffer, mimeType, vaultSlug = "vau
   }
 
   const mediaRoot = await resolveMediaRoot();
-  const vaultsDir = path.join(mediaRoot, "vaults");
-  await fs.mkdir(vaultsDir, { recursive: true });
+  const userVaultsDir = path.join(mediaRoot, "vaults", String(uid));
+  await fs.mkdir(userVaultsDir, { recursive: true });
 
-  const safeSlug = String(vaultSlug || "vault")
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32) || "vault";
+  const safeSlug =
+    String(vaultSlug || "vault")
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32) || "vault";
 
   const uniqueToken = crypto.randomBytes(6).toString("hex");
   const filename = `${safeSlug}-${Date.now()}-${uniqueToken}.${ext}`;
-  const fullPath = path.join(vaultsDir, filename);
+  const fullPath = path.join(userVaultsDir, filename);
 
   await fs.writeFile(fullPath, buffer);
 
-  return `/api/media/vaults/${filename}`;
+  return `/api/media/vaults/${uid}/${filename}`;
 }
 
 /**
- * Read a stored media file safely with strict path-traversal containment
+ * Read a stored media file safely with strict user ownership & path-traversal containment
  */
-export async function readMediaFileSafe(pathSegments = []) {
-  if (!Array.isArray(pathSegments) || pathSegments.length === 0) {
+export async function readUserMediaFileSafe(userId, pathSegments = []) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) return null;
+  if (!Array.isArray(pathSegments) || pathSegments.length < 2) {
     return null;
   }
 
@@ -92,7 +99,10 @@ export async function readMediaFileSafe(pathSegments = []) {
     .map((s) => String(s || "").trim())
     .filter((s) => s && s !== "." && s !== "..");
 
-  if (cleanSegments.length === 0) return null;
+  // Enforce strict namespace isolation: /api/media/vaults/<userId>/<file>
+  if (cleanSegments.length !== 3 || cleanSegments[0] !== "vaults" || cleanSegments[1] !== String(uid)) {
+    return null;
+  }
 
   const mediaRoot = await resolveMediaRoot();
   const targetPath = path.resolve(mediaRoot, ...cleanSegments);

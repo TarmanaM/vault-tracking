@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { toDecimal, subMoney, roundMoney } from "@/lib/money";
 import { recalculateLedgerRunningBalances } from "@/lib/ledgerService";
 import { getOrCreateAppSettings, getCachedRateMap } from "@/lib/fxService";
@@ -16,6 +17,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
     const {
       vaultId,
@@ -28,8 +32,8 @@ export async function POST(request) {
     } = body;
 
     const result = await prisma.$transaction(async (tx) => {
-      const vault = await tx.vault.findUnique({
-        where: { id: parseInt(vaultId, 10) },
+      const vault = await tx.vault.findFirst({
+        where: { id: parseInt(vaultId, 10), userId: user.id },
         include: { subContainers: true },
       });
       if (!vault) throw new Error("Vault not found");
@@ -42,11 +46,23 @@ export async function POST(request) {
       const monthTag = `${now.toLocaleString("en-US", { month: "short" })},${now.getFullYear()}`;
       const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
-      const selfParty = await tx.party.findFirst({ where: { partyType: "SELF" } });
+      let selfParty = await tx.party.findFirst({ where: { userId: user.id, partyType: "SELF" } });
+      if (!selfParty) {
+        selfParty = await tx.party.create({
+          data: {
+            userId: user.id,
+            code: "SELF",
+            name: user.fullName || user.username || "Me",
+            partyType: "SELF",
+            isActive: true,
+          },
+        });
+      }
 
       // 1. Create VaultCheckpoint Record
       const checkpoint = await tx.vaultCheckpoint.create({
         data: {
+          userId: user.id,
           vaultId: vault.id,
           checkpointTimestamp: now,
           checkpointDate: now,
@@ -72,7 +88,7 @@ export async function POST(request) {
             data: {
               checkpointId: checkpoint.id,
               itemType: d.itemType || "COIN_PIECE",
-              label: d.label || `Pecahan ${d.unitValue}`,
+              label: d.label || `Unit ${d.unitValue}`,
               unitValue: uVal,
               quantity: qty,
               subtotal: sub,
@@ -81,7 +97,7 @@ export async function POST(request) {
         }
       }
 
-      const settings = await getOrCreateAppSettings(tx);
+      const settings = await getOrCreateAppSettings(user.id, tx);
       const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
 
       if (subContainers && subContainers.length > 0) {
@@ -112,19 +128,22 @@ export async function POST(request) {
         });
       }
 
-      const defaultSub = await ensureDefaultSubContainer(tx, vault.id);
+      const defaultSub = await ensureDefaultSubContainer(tx, vault.id, baseCurrency);
 
       // 3. Auto-Reconciliation Transaction if there is a discrepancy
       if (discrepancyDec.lessThan(0)) {
-        const lostCategory = await tx.category.findUnique({ where: { code: "EXP_CASH_LOST" } });
+        const lostCategory = await tx.category.findUnique({
+          where: { userId_code: { userId: user.id, code: "EXP_CASH_LOST" } },
+        });
         const absDiff = discrepancyDec.abs();
 
         const reconTx = await tx.transaction.create({
           data: {
+            userId: user.id,
             transactionDate: now,
             transactionTime: timeStr,
             monthTag,
-            title: `Selisih Kurang (Belum Tercatat) - ${vault.name}`,
+            title: `Unrecorded Shortage - ${vault.name}`,
             nature: "RECONCILIATION_LOST",
             categoryId: lostCategory ? lostCategory.id : null,
             commitmentType: "NONE",
@@ -157,14 +176,17 @@ export async function POST(request) {
           },
         });
       } else if (discrepancyDec.greaterThan(0)) {
-        const surplusCategory = await tx.category.findUnique({ where: { code: "INC_RECON_SURPLUS" } });
+        const surplusCategory = await tx.category.findUnique({
+          where: { userId_code: { userId: user.id, code: "INC_RECON_SURPLUS" } },
+        });
 
         const reconTx = await tx.transaction.create({
           data: {
+            userId: user.id,
             transactionDate: now,
             transactionTime: timeStr,
             monthTag,
-            title: `Bunga Bank / Selisih Lebih - ${vault.name}`,
+            title: `Reconciliation Surplus / Interest - ${vault.name}`,
             nature: "RECONCILIATION_FOUND",
             categoryId: surplusCategory ? surplusCategory.id : null,
             commitmentType: "NONE",
@@ -205,7 +227,7 @@ export async function POST(request) {
       });
 
       await evaluateBasePartitionState(tx, vault.id, baseCurrency);
-      await recalculateLedgerRunningBalances(tx);
+      await recalculateLedgerRunningBalances(tx, user.id);
 
       return checkpoint;
     });
@@ -223,14 +245,18 @@ export async function POST(request) {
   }
 }
 
-export async function GET() {
+export async function GET(request) {
   try {
-    const settings = await getOrCreateAppSettings();
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
+    const settings = await getOrCreateAppSettings(user.id);
     const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
     const rateMap = await getCachedRateMap(baseCurrency);
 
     const [checkpoints, rawVaults] = await Promise.all([
       prisma.vaultCheckpoint.findMany({
+        where: { userId: user.id },
         include: {
           vault: true,
           denominations: true,
@@ -240,7 +266,7 @@ export async function GET() {
         take: 30,
       }),
       prisma.vault.findMany({
-        where: { isActive: true },
+        where: { userId: user.id, isActive: true },
         include: {
           subContainers: {
             orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],

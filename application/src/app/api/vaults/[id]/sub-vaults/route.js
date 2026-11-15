@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { toDecimal, roundMoney } from "@/lib/money";
 import { getOrCreateAppSettings, getCachedRateMap } from "@/lib/fxService";
 import {
@@ -25,6 +26,9 @@ function slugSubCode(name, fallback = "POCKET") {
 
 export async function POST(request, { params }) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const resolved = await params;
     const vaultId = parseInt(resolved?.id, 10);
     if (!vaultId) {
@@ -46,13 +50,13 @@ export async function POST(request, { params }) {
     }
 
     const created = await prisma.$transaction(async (tx) => {
-      const vault = await tx.vault.findUnique({
-        where: { id: vaultId },
+      const vault = await tx.vault.findFirst({
+        where: { id: vaultId, userId: user.id },
         include: { subContainers: true },
       });
       if (!vault) throw new Error("Vault not found");
 
-      const settings = await getOrCreateAppSettings(tx);
+      const settings = await getOrCreateAppSettings(user.id, tx);
       const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
       const targetCurrency = String(currency || baseCurrency).trim().toUpperCase();
 
@@ -110,7 +114,7 @@ export async function POST(request, { params }) {
         });
       }
 
-      await ensureDefaultSubContainer(tx, vaultId);
+      await ensureDefaultSubContainer(tx, vaultId, baseCurrency);
       const partitionState = await evaluateBasePartitionState(tx, vaultId, baseCurrency);
 
       return { subContainer: newSub, partitionState };
@@ -128,14 +132,25 @@ export async function POST(request, { params }) {
 
 export async function PATCH(request, { params }) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const resolved = await params;
     const vaultId = parseInt(resolved?.id, 10);
     if (!vaultId) {
       return NextResponse.json({ success: false, error: "Invalid vault ID" }, { status: 400 });
     }
 
+    const ownedVault = await prisma.vault.findFirst({
+      where: { id: vaultId, userId: user.id },
+      select: { id: true },
+    });
+    if (!ownedVault) {
+      return NextResponse.json({ success: false, error: "Vault not found" }, { status: 404 });
+    }
+
     const body = await request.json();
-    const settings = await getOrCreateAppSettings();
+    const settings = await getOrCreateAppSettings(user.id);
     const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
 
     // Mode A: Full Sync Sub-Vault Split batch (does NOT alter Main Vault balance)
@@ -144,6 +159,7 @@ export async function PATCH(request, { params }) {
         allocations: body.allocations || [],
         defaultSubContainerId: body.defaultSubContainerId || null,
         baseCurrency,
+        userId: user.id,
       });
       const rateMap = await getCachedRateMap(baseCurrency);
       return NextResponse.json({
@@ -185,7 +201,7 @@ export async function PATCH(request, { params }) {
         },
       });
 
-      await ensureDefaultSubContainer(tx, vaultId);
+      await ensureDefaultSubContainer(tx, vaultId, baseCurrency);
       const partitionState = await evaluateBasePartitionState(tx, vaultId, baseCurrency);
       const vault = await tx.vault.findUnique({
         where: { id: vaultId },
@@ -210,6 +226,9 @@ export async function PATCH(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const resolved = await params;
     const vaultId = parseInt(resolved?.id, 10);
     const { searchParams } = new URL(request.url);
@@ -220,7 +239,15 @@ export async function DELETE(request, { params }) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const settings = await getOrCreateAppSettings(tx);
+      const ownedVault = await tx.vault.findFirst({
+        where: { id: vaultId, userId: user.id },
+        select: { id: true },
+      });
+      if (!ownedVault) {
+        throw new Error("Vault not found");
+      }
+
+      const settings = await getOrCreateAppSettings(user.id, tx);
       const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
 
       const sub = await tx.vaultSubContainer.findUnique({ where: { id: subId } });
@@ -245,7 +272,7 @@ export async function DELETE(request, { params }) {
           },
         });
       } else {
-        await ensureDefaultSubContainer(tx, vaultId);
+        await ensureDefaultSubContainer(tx, vaultId, baseCurrency);
         await evaluateBasePartitionState(tx, vaultId, baseCurrency);
       }
 

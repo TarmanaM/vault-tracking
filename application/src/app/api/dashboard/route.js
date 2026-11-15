@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { calculateCardScore } from "@/lib/habitEngine";
 import { toDecimal, addMoney, subMoney, roundMoney } from "@/lib/money";
 import { isPhysicalCashVault, isSelectableSpendVault, sortVaultsByBalanceDesc } from "@/lib/vaultHelpers";
@@ -15,19 +16,22 @@ import { computeVaultPartitionSummary } from "@/lib/subVaultService";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const now = new Date();
     let currentMonthTag = `${now.toLocaleString("en-US", { month: "short" })},${now.getFullYear()}`;
 
-    await ensureFxRatesSyncedIfDue();
-    const appSettings = await getOrCreateAppSettings();
+    await ensureFxRatesSyncedIfDue(user.id);
+    const appSettings = await getOrCreateAppSettings(user.id);
     const baseCurrency = String(appSettings.baseCurrency || "IDR").toUpperCase();
     const rateMap = await getCachedRateMap(baseCurrency);
 
     // 1. Fetch all active vaults with sub-vault FX enrichment sorted descending (#5)
     const rawVaults = await prisma.vault.findMany({
-      where: { isActive: true },
+      where: { userId: user.id, isActive: true },
       include: {
         subContainers: {
           orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { id: "asc" }],
@@ -48,7 +52,7 @@ export async function GET() {
 
     // 2. Fetch all active parties with separate receivable/payable balances
     const rawParties = await prisma.party.findMany({
-      where: { isActive: true },
+      where: { userId: user.id, isActive: true },
       orderBy: { id: "asc" },
     });
 
@@ -64,7 +68,7 @@ export async function GET() {
 
     // 3. Fetch action cards grouped by visibilityMode (#11, #23)
     const rawActionCards = await prisma.actionCard.findMany({
-      where: { isActive: true },
+      where: { userId: user.id, isActive: true },
       include: {
         defaultVault: true,
         defaultSubContainer: true,
@@ -79,6 +83,7 @@ export async function GET() {
     // Determine most-used primary vault per Action Card (#4 dynamic habit default)
     const cardTxHistory = await prisma.transaction.findMany({
       where: {
+        userId: user.id,
         actionCardId: { not: null },
         nature: { not: "INITIAL_FUND" },
       },
@@ -127,7 +132,6 @@ export async function GET() {
 
     // 4. Compute Wealth Breakdown (includes live mark-to-market foreign sub-vaults)
     let liquidWealth = toDecimal(0);
-    let heldPoolWealth = toDecimal(0);
     let liabilityPayable = toDecimal(0);
 
     for (const v of vaults) {
@@ -136,8 +140,6 @@ export async function GET() {
         if (bal.lessThan(0)) {
           liabilityPayable = addMoney(liabilityPayable, bal.abs());
         }
-      } else if (v.vaultType === "HELD_POOL") {
-        heldPoolWealth = addMoney(heldPoolWealth, bal);
       } else {
         liquidWealth = addMoney(liquidWealth, bal);
       }
@@ -154,13 +156,13 @@ export async function GET() {
     const totalReceivables = thirdPartyReceivable;
     const totalPayables = addMoney(liabilityPayable, thirdPartyPayable);
     const netTotalWealth = subMoney(
-      addMoney(addMoney(liquidWealth, heldPoolWealth), totalReceivables),
+      addMoney(liquidWealth, totalReceivables),
       totalPayables
     );
 
     // 5. Current Month Consumption Breakdown by Layer (fallback to latest tx month if current month empty)
     let monthTransactions = await prisma.transaction.findMany({
-      where: { monthTag: currentMonthTag },
+      where: { userId: user.id, monthTag: currentMonthTag },
       include: {
         category: true,
         legs: {
@@ -172,12 +174,13 @@ export async function GET() {
 
     if (monthTransactions.length === 0) {
       const latestTx = await prisma.transaction.findFirst({
+        where: { userId: user.id },
         orderBy: [{ transactionDate: "desc" }, { id: "desc" }],
       });
       if (latestTx) {
         currentMonthTag = latestTx.monthTag;
         monthTransactions = await prisma.transaction.findMany({
-          where: { monthTag: currentMonthTag },
+          where: { userId: user.id, monthTag: currentMonthTag },
           include: {
             category: true,
             legs: {
@@ -245,6 +248,7 @@ export async function GET() {
 
     // 6. Latest Checkpoint per Vault for #15 Auto-Retroactive Detection
     const allCheckpoints = await prisma.vaultCheckpoint.findMany({
+      where: { userId: user.id },
       orderBy: { checkpointTimestamp: "desc" },
     });
     const latestCheckpointsByVault = {};
@@ -262,11 +266,11 @@ export async function GET() {
     // 7. Pending Reminders & Categories
     const [pendingReminders, categories] = await Promise.all([
       prisma.pendingReminder.findMany({
-        where: { status: "PENDING" },
+        where: { userId: user.id, status: "PENDING" },
         orderBy: { createdAt: "desc" },
       }),
       prisma.category.findMany({
-        where: { isActive: true },
+        where: { userId: user.id, isActive: true },
         orderBy: { sortOrder: "asc" },
       }),
     ]);
@@ -276,7 +280,6 @@ export async function GET() {
       data: {
         summary: {
           liquidWealth: roundMoney(liquidWealth),
-          heldPoolWealth: roundMoney(heldPoolWealth),
           totalReceivables: roundMoney(totalReceivables),
           totalPayables: roundMoney(totalPayables),
           netTotalWealth: roundMoney(netTotalWealth),

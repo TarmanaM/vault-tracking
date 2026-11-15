@@ -6,19 +6,24 @@ import { toDecimal, mulMoney, divMoney, roundMoney } from "./money.js";
 import { SUPPORTED_CURRENCIES } from "./currencyHelpers.js";
 
 const FRANKFURTER_V2_BASE = "https://api.frankfurter.dev/v2";
-let activeSyncPromise = null;
+const activeSyncPromisesByUser = new Map();
 
 /**
- * Fetch or lazily initialize singleton AppSetting (row id = 1)
+ * Fetch or lazily initialize per-user AppSetting
  */
-export async function getOrCreateAppSettings(prismaClient = prisma) {
-  let settings = await prismaClient.appSetting.findUnique({ where: { id: 1 } });
+export async function getOrCreateAppSettings(userId, prismaClient = prisma) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) {
+    throw new Error("Authenticated userId is required to load AppSetting");
+  }
+
+  let settings = await prismaClient.appSetting.findUnique({ where: { userId: uid } });
   if (!settings) {
     settings = await prismaClient.appSetting.upsert({
-      where: { id: 1 },
+      where: { userId: uid },
       update: {},
       create: {
-        id: 1,
+        userId: uid,
         baseCurrency: "IDR",
         fxSyncIntervalDays: 3,
       },
@@ -136,13 +141,15 @@ async function fetchPairFromFrankfurter(fromCode, toCode) {
 }
 
 /**
- * Collect unique foreign currencies currently held in active vaults (strict active sub-vaults only)
+ * Collect unique foreign currencies currently held in active vaults for a user
  */
-export async function getActiveForeignCurrencies(baseCurrency = "IDR", prismaClient = prisma) {
+export async function getActiveForeignCurrencies(userId, baseCurrency = "IDR", prismaClient = prisma) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) return [];
   const normalizedBase = String(baseCurrency || "IDR").toUpperCase();
   const rows = await prismaClient.vaultSubContainer.findMany({
     where: {
-      vault: { isActive: true },
+      vault: { userId: uid, isActive: true },
       currency: { not: normalizedBase },
     },
     distinct: ["currency"],
@@ -172,17 +179,22 @@ export function isFxSyncDue(settings, hasAllActiveRates = true) {
 }
 
 /**
- * Sync exchange rates from Frankfurter v2 ONLY for active foreign currencies in use
+ * Sync exchange rates from Frankfurter v2 ONLY for active foreign currencies in use by this user
  */
-export async function syncFxRatesFromFrankfurter({ force = false, currencies = null } = {}) {
-  if (activeSyncPromise) {
-    return await activeSyncPromise;
+export async function syncFxRatesFromFrankfurter({ userId, force = false, currencies = null } = {}) {
+  const uid = parseInt(userId, 10);
+  if (!uid || Number.isNaN(uid)) {
+    throw new Error("Authenticated userId is required for FX rate sync");
   }
 
-  activeSyncPromise = (async () => {
-    const settings = await getOrCreateAppSettings(prisma);
+  if (activeSyncPromisesByUser.has(uid)) {
+    return await activeSyncPromisesByUser.get(uid);
+  }
+
+  const syncPromise = (async () => {
+    const settings = await getOrCreateAppSettings(uid, prisma);
     const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
-    const activeForeignCurrencies = await getActiveForeignCurrencies(baseCurrency, prisma);
+    const activeForeignCurrencies = await getActiveForeignCurrencies(uid, baseCurrency, prisma);
 
     // Restrict sync targets strictly to active sub-vault foreign currencies
     let targets = activeForeignCurrencies;
@@ -273,7 +285,7 @@ export async function syncFxRatesFromFrankfurter({ force = false, currencies = n
     const now = new Date();
     const status = updatedRates.length > 0 ? "OK" : "ERROR";
     await prisma.appSetting.update({
-      where: { id: 1 },
+      where: { userId: uid },
       data: {
         ...(updatedRates.length > 0 ? { lastFxSyncedAt: now } : {}),
         lastFxStatus: status,
@@ -292,21 +304,28 @@ export async function syncFxRatesFromFrankfurter({ force = false, currencies = n
     };
   })();
 
+  activeSyncPromisesByUser.set(uid, syncPromise);
+
   try {
-    return await activeSyncPromise;
+    return await syncPromise;
   } finally {
-    activeSyncPromise = null;
+    activeSyncPromisesByUser.delete(uid);
   }
 }
 
 /**
  * Background-safe check used by read routes (/api/dashboard, /api/analytics) to sync only when active foreign vaults exist and are overdue
  */
-export async function ensureFxRatesSyncedIfDue() {
+export async function ensureFxRatesSyncedIfDue(userId) {
   try {
-    const settings = await getOrCreateAppSettings(prisma);
+    const uid = parseInt(userId, 10);
+    if (!uid || Number.isNaN(uid)) {
+      return { skipped: true, reason: "UNAUTHENTICATED", activeCurrencies: [] };
+    }
+
+    const settings = await getOrCreateAppSettings(uid, prisma);
     const baseCurrency = String(settings.baseCurrency || "IDR").toUpperCase();
-    const activeForeignCurrencies = await getActiveForeignCurrencies(baseCurrency, prisma);
+    const activeForeignCurrencies = await getActiveForeignCurrencies(uid, baseCurrency, prisma);
 
     // Disable external sync calls completely when no active vault uses a foreign currency
     if (activeForeignCurrencies.length === 0) {
@@ -328,7 +347,7 @@ export async function ensureFxRatesSyncedIfDue() {
     const hasAllActiveRates = activeForeignCurrencies.every((code) => existingSet.has(code));
 
     if (isFxSyncDue(settings, hasAllActiveRates)) {
-      return await syncFxRatesFromFrankfurter({ force: false });
+      return await syncFxRatesFromFrankfurter({ userId: uid, force: false });
     }
     return {
       skipped: true,

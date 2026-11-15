@@ -291,9 +291,10 @@ export async function applySubVaultMutationInTx(
  */
 export async function syncVaultPartitions(
   vaultId,
-  { allocations = [], defaultSubContainerId = null, baseCurrency = "IDR" }
+  { allocations = [], defaultSubContainerId = null, baseCurrency = "IDR", userId = null }
 ) {
   const vId = parseInt(vaultId, 10);
+  const uid = userId ? parseInt(userId, 10) : null;
   const baseUpper = String(baseCurrency || "IDR").toUpperCase();
 
   return await prisma.$transaction(async (tx) => {
@@ -305,7 +306,7 @@ export async function syncVaultPartitions(
         },
       },
     });
-    if (!vault) throw new Error("Vault not found");
+    if (!vault || (uid && vault.userId !== uid)) throw new Error("Vault not found");
 
     if (defaultSubContainerId) {
       const dId = parseInt(defaultSubContainerId, 10);

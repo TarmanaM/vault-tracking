@@ -1,16 +1,20 @@
 // API Route: GET /api/media/[...path]
-// Serves uploaded media files safely from data-server/media/
+// Serves uploaded user-scoped media files safely from data-server/media/vaults/<userId>/
 
 import { NextResponse } from "next/server";
-import { readMediaFileSafe } from "@/lib/mediaStorage";
+import { requireUser } from "@/lib/auth";
+import { readUserMediaFileSafe } from "@/lib/mediaStorage";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request, { params }) {
+export async function GET(request, { params }) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const resolved = await params;
     const segments = resolved?.path || [];
-    const file = await readMediaFileSafe(segments);
+    const file = await readUserMediaFileSafe(user.id, segments);
 
     if (!file) {
       return NextResponse.json({ success: false, error: "Media file not found" }, { status: 404 });
@@ -20,7 +24,7 @@ export async function GET(_request, { params }) {
       status: 200,
       headers: {
         "Content-Type": file.contentType,
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control": "private, max-age=31536000",
       },
     });
   } catch (error) {

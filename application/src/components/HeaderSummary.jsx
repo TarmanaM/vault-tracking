@@ -118,23 +118,12 @@ export default function HeaderSummary({ summary, baseCurrency = "IDR" }) {
 
           <Box>
             <Typography variant="caption" sx={{ color: "#94A3B8", display: "block" }}>
-              Payables &amp; PayLater (Utang)
+              Payables &amp; PayLater
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 700, color: "#F87171" }}>
               <MoneyValue value={summary.totalPayables} currency={baseCurrency} allowTapToggle />
             </Typography>
           </Box>
-
-          {summary.heldPoolWealth > 0 && (
-            <Box>
-              <Typography variant="caption" sx={{ color: "#94A3B8", display: "block" }}>
-                Held Fund Pool (Taspen)
-              </Typography>
-              <Typography variant="body2" sx={{ fontWeight: 700, color: "#A78BFA" }}>
-                <MoneyValue value={summary.heldPoolWealth} currency={baseCurrency} allowTapToggle />
-              </Typography>
-            </Box>
-          )}
         </Stack>
       </CardContent>
 
@@ -153,7 +142,7 @@ export default function HeaderSummary({ summary, baseCurrency = "IDR" }) {
           Net Wealth is calculated using real-time double-entry balances:
         </Typography>
         <Box sx={{ bgcolor: "#F1F5F9", p: 1.5, borderRadius: 1.5, fontSize: "0.8rem", fontFamily: "monospace" }}>
-          Net Wealth = (Liquid Cash + Bank Deposits + Held Pools + Piutang Teman) - (Utang &amp; PayLater)
+          Net Wealth = (Liquid Vaults + Receivables) - (Payables &amp; PayLater)
         </Box>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
           • Exact cent decimals (.21/.67) are preserved using decimal.js without rounding errors.

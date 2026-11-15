@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import {
   getOrCreateAppSettings,
   getCachedRateMap,
@@ -14,16 +15,19 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request) {
   try {
-    const settings = await getOrCreateAppSettings();
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
+    const settings = await getOrCreateAppSettings(user.id);
     const [rates, rateMap, activeForeignCurrencies] = await Promise.all([
       prisma.exchangeRateCache.findMany({
         where: { quoteCurrency: settings.baseCurrency },
         orderBy: { baseCurrency: "asc" },
       }),
       getCachedRateMap(settings.baseCurrency),
-      getActiveForeignCurrencies(settings.baseCurrency),
+      getActiveForeignCurrencies(user.id, settings.baseCurrency),
     ]);
 
     return NextResponse.json({
@@ -48,8 +52,11 @@ export async function GET() {
 
 export async function PATCH(request) {
   try {
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
-    const current = await getOrCreateAppSettings();
+    const current = await getOrCreateAppSettings(user.id);
 
     const nextBase = body.baseCurrency
       ? String(body.baseCurrency).trim().toUpperCase().slice(0, 8)
@@ -70,7 +77,7 @@ export async function PATCH(request) {
     const baseChanged = nextBase !== current.baseCurrency;
 
     await prisma.appSetting.update({
-      where: { id: 1 },
+      where: { userId: user.id },
       data: {
         baseCurrency: nextBase,
         fxSyncIntervalDays: nextInterval,
@@ -88,20 +95,20 @@ export async function PATCH(request) {
     let syncResult = null;
     if (baseChanged || body.syncAfterSave) {
       try {
-        syncResult = await syncFxRatesFromFrankfurter({ force: true });
+        syncResult = await syncFxRatesFromFrankfurter({ userId: user.id, force: true });
       } catch (err) {
         syncResult = { synced: false, error: err.message };
       }
     }
 
     const [updatedSettings, rates, rateMap, activeForeignCurrencies] = await Promise.all([
-      getOrCreateAppSettings(),
+      getOrCreateAppSettings(user.id),
       prisma.exchangeRateCache.findMany({
         where: { quoteCurrency: nextBase },
         orderBy: { baseCurrency: "asc" },
       }),
       getCachedRateMap(nextBase),
-      getActiveForeignCurrencies(nextBase),
+      getActiveForeignCurrencies(user.id, nextBase),
     ]);
 
     return NextResponse.json({

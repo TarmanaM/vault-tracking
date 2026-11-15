@@ -2,11 +2,15 @@
 // Handles full or manual partial debt forgiveness / write-off conversion to charity or expense
 
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth";
 import { writeOffDebt } from "@/lib/ledgerService";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
     const {
@@ -25,6 +29,7 @@ export async function POST(request) {
     }
 
     const result = await writeOffDebt({
+      userId: user.id,
       debtEntryId,
       partyId,
       amount,

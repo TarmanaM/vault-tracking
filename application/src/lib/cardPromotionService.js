@@ -42,14 +42,16 @@ function parseOptionalInt(value) {
 }
 
 /**
- * Find an existing active (non-archived) ActionCard with the same normalized title & cardActionType.
+ * Find an existing active (non-archived) ActionCard belonging to userId with the same normalized title & cardActionType.
  */
-export async function findMatchingActiveCard(txClient, title, cardActionType) {
+export async function findMatchingActiveCard(txClient, userId, title, cardActionType) {
+  const uid = parseOptionalInt(userId);
   const normalizedTarget = normalizeCardTitle(title);
-  if (!normalizedTarget) return null;
+  if (!uid || !normalizedTarget) return null;
 
   const candidates = await txClient.actionCard.findMany({
     where: {
+      userId: uid,
       isActive: true,
       visibilityMode: { not: "ARCHIVED" },
       cardActionType,
@@ -62,11 +64,15 @@ export async function findMatchingActiveCard(txClient, title, cardActionType) {
 }
 
 /**
- * Find non-child historical transactions matching the source nature and normalized title(s).
+ * Find user-owned non-child historical transactions matching the source nature and normalized title(s).
  */
-export async function findMatchingHistoricalTransactions(txClient, nature, matchTitlesSet, sourceTx) {
+export async function findMatchingHistoricalTransactions(txClient, userId, nature, matchTitlesSet, sourceTx) {
+  const uid = parseOptionalInt(userId);
+  if (!uid) return [];
+
   const rows = await txClient.transaction.findMany({
     where: {
+      userId: uid,
       nature,
       parentTransactionId: null,
     },
@@ -77,7 +83,7 @@ export async function findMatchingHistoricalTransactions(txClient, nature, match
   });
 
   const matched = rows.filter((row) => matchTitlesSet.has(normalizeCardTitle(row.title)));
-  if (sourceTx && !matched.some((row) => row.id === sourceTx.id)) {
+  if (sourceTx && sourceTx.userId === uid && !matched.some((row) => row.id === sourceTx.id)) {
     matched.push(sourceTx);
   }
   return matched;
@@ -88,6 +94,11 @@ export async function findMatchingHistoricalTransactions(txClient, nature, match
  * atomically seeding CardHabitStats and updating ONLY the source transaction's actionCardId.
  */
 export async function promoteTransactionToCard(input = {}) {
+  const userId = parseOptionalInt(input.userId);
+  if (!userId || userId <= 0) {
+    throw new PromotionError("Authenticated userId is required", 401, "UNAUTHORIZED");
+  }
+
   const sourceTransactionId = parseOptionalInt(input.sourceTransactionId);
   if (!sourceTransactionId || sourceTransactionId <= 0) {
     throw new PromotionError("Valid sourceTransactionId is required", 400, "INVALID_SOURCE_TX");
@@ -95,8 +106,8 @@ export async function promoteTransactionToCard(input = {}) {
 
   const mode = input.mode === "LINK_EXISTING" ? "LINK_EXISTING" : "CREATE";
 
-  const sourceTx = await prisma.transaction.findUnique({
-    where: { id: sourceTransactionId },
+  const sourceTx = await prisma.transaction.findFirst({
+    where: { id: sourceTransactionId, userId },
     include: {
       legs: {
         include: {
@@ -139,8 +150,8 @@ export async function promoteTransactionToCard(input = {}) {
     }
 
     return prisma.$transaction(async (tx) => {
-      const existingCard = await tx.actionCard.findUnique({
-        where: { id: existingCardId },
+      const existingCard = await tx.actionCard.findFirst({
+        where: { id: existingCardId, userId },
       });
       if (!existingCard || !existingCard.isActive) {
         throw new PromotionError("Target Action Card not found or inactive", 404, "CARD_NOT_FOUND");
@@ -206,7 +217,7 @@ export async function promoteTransactionToCard(input = {}) {
 
   const allowDuplicate = Boolean(input.allowDuplicate);
   if (!allowDuplicate) {
-    const duplicate = await findMatchingActiveCard(prisma, title, cardActionType);
+    const duplicate = await findMatchingActiveCard(prisma, userId, title, cardActionType);
     if (duplicate) {
       throw new PromotionError(
         `An active card named "${duplicate.title}" (${duplicate.cardActionType}) already exists`,
@@ -259,8 +270,26 @@ export async function promoteTransactionToCard(input = {}) {
       : 8;
 
   return prisma.$transaction(async (tx) => {
+    if (defaultVaultId) {
+      const v = await tx.vault.findFirst({ where: { id: defaultVaultId, userId } });
+      if (!v) throw new PromotionError("Selected vault does not belong to you", 403, "FORBIDDEN_VAULT");
+    }
+    if (targetVaultId) {
+      const tv = await tx.vault.findFirst({ where: { id: targetVaultId, userId } });
+      if (!tv) throw new PromotionError("Selected target vault does not belong to you", 403, "FORBIDDEN_VAULT");
+    }
+    if (defaultCategoryId) {
+      const c = await tx.category.findFirst({ where: { id: defaultCategoryId, userId } });
+      if (!c) throw new PromotionError("Selected category does not belong to you", 403, "FORBIDDEN_CATEGORY");
+    }
+    if (defaultPartyId) {
+      const p = await tx.party.findFirst({ where: { id: defaultPartyId, userId } });
+      if (!p) throw new PromotionError("Selected party does not belong to you", 403, "FORBIDDEN_PARTY");
+    }
+
     const createdCard = await tx.actionCard.create({
       data: {
+        userId,
         title,
         subtitle: input.subtitle ? String(input.subtitle).trim() : null,
         cardActionType,
@@ -283,6 +312,7 @@ export async function promoteTransactionToCard(input = {}) {
     const matchTitles = new Set([normalizeCardTitle(sourceTx.title), normalizeCardTitle(title)]);
     const matchingTransactions = await findMatchingHistoricalTransactions(
       tx,
+      userId,
       sourceTx.nature,
       matchTitles,
       sourceTx
@@ -438,26 +468,31 @@ function summarizeMatchingTransactionPattern(rows = []) {
 }
 
 /**
- * Retrieve dismissed suggestion keys stored in singleton AppSetting.
+ * Retrieve dismissed suggestion keys stored in per-user AppSetting.
  */
-export async function getDismissedCardSuggestionKeys() {
+export async function getDismissedCardSuggestionKeys(userId) {
+  const uid = parseOptionalInt(userId);
+  if (!uid) return [];
   const setting = await prisma.appSetting.upsert({
-    where: { id: 1 },
+    where: { userId: uid },
     update: {},
-    create: { id: 1, baseCurrency: "IDR", fxSyncIntervalDays: 3 },
+    create: { userId: uid, baseCurrency: "IDR", fxSyncIntervalDays: 3 },
   });
   return parseDismissedKeys(setting.dismissedCardSuggestionsJson);
 }
 
 /**
- * Permanently mute save-time card suggestions for a (nature, title) pair across devices.
+ * Permanently mute save-time card suggestions for a (nature, title) pair for this user.
  */
-export async function dismissCardSuggestionKey(nature, title) {
+export async function dismissCardSuggestionKey(userId, nature, title) {
+  const uid = parseOptionalInt(userId);
+  if (!uid) throw new PromotionError("Authenticated userId is required", 401, "UNAUTHORIZED");
+
   const key = makeSuggestionKey(nature, title);
   const setting = await prisma.appSetting.upsert({
-    where: { id: 1 },
+    where: { userId: uid },
     update: {},
-    create: { id: 1, baseCurrency: "IDR", fxSyncIntervalDays: 3 },
+    create: { userId: uid, baseCurrency: "IDR", fxSyncIntervalDays: 3 },
   });
   const existing = parseDismissedKeys(setting.dismissedCardSuggestionsJson);
   if (!normalizeCardTitle(title) || existing.includes(key)) {
@@ -466,19 +501,25 @@ export async function dismissCardSuggestionKey(nature, title) {
 
   const updatedKeys = [...existing, key];
   await prisma.appSetting.update({
-    where: { id: 1 },
+    where: { userId: uid },
     data: { dismissedCardSuggestionsJson: JSON.stringify(updatedKeys) },
   });
   return updatedKeys;
 }
 
 /**
- * Fetch combined autocomplete suggestions (Active/Soft-Hidden ActionCards + grouped past Transactions).
+ * Fetch combined autocomplete suggestions scoped to userId (ActionCards + grouped past Transactions).
  */
-export async function getTransactionTitleSuggestions(limit = 40) {
+export async function getTransactionTitleSuggestions(userId, limit = 40) {
+  const uid = parseOptionalInt(userId);
+  if (!uid) {
+    return { cards: [], historySuggestions: [] };
+  }
+
   const [cards, recentTxs, setting] = await Promise.all([
     prisma.actionCard.findMany({
       where: {
+        userId: uid,
         isActive: true,
         visibilityMode: { not: "ARCHIVED" },
       },
@@ -495,6 +536,7 @@ export async function getTransactionTitleSuggestions(limit = 40) {
     }),
     prisma.transaction.findMany({
       where: {
+        userId: uid,
         parentTransactionId: null,
         nature: { in: ELIGIBLE_PROMOTE_NATURES },
       },
@@ -511,7 +553,7 @@ export async function getTransactionTitleSuggestions(limit = 40) {
       orderBy: [{ transactionDate: "desc" }, { id: "desc" }],
       take: 400,
     }),
-    prisma.appSetting.findUnique({ where: { id: 1 } }),
+    prisma.appSetting.findUnique({ where: { userId: uid } }),
   ]);
 
   const baseCcy = String(setting?.baseCurrency || "IDR").toUpperCase();
@@ -587,12 +629,13 @@ export async function getTransactionTitleSuggestions(limit = 40) {
  * Evaluate after saving a transaction whether the system should display
  * a persistent card suggestion dialog (LINK_EXISTING vs CREATE_CARD).
  */
-export async function evaluatePostSaveCardSuggestion(transactionId) {
+export async function evaluatePostSaveCardSuggestion(userId, transactionId) {
+  const uid = parseOptionalInt(userId);
   const txId = parseOptionalInt(transactionId);
-  if (!txId || txId <= 0) return null;
+  if (!uid || !txId || txId <= 0) return null;
 
-  const sourceTx = await prisma.transaction.findUnique({
-    where: { id: txId },
+  const sourceTx = await prisma.transaction.findFirst({
+    where: { id: txId, userId: uid },
     include: {
       category: true,
       party: true,
@@ -617,13 +660,13 @@ export async function evaluatePostSaveCardSuggestion(transactionId) {
   }
 
   const suggestionKey = makeSuggestionKey(sourceTx.nature, sourceTx.title);
-  const dismissedKeys = await getDismissedCardSuggestionKeys();
+  const dismissedKeys = await getDismissedCardSuggestionKeys(uid);
   if (dismissedKeys.includes(suggestionKey)) {
     return null;
   }
 
   // Case 1: Active Action Card already exists with matching normalized title & nature
-  const existingCard = await findMatchingActiveCard(prisma, sourceTx.title, sourceTx.nature);
+  const existingCard = await findMatchingActiveCard(prisma, uid, sourceTx.title, sourceTx.nature);
   if (existingCard) {
     const bullets = [
       `Existing card "${existingCard.title}" (${existingCard.cardActionType}) is already saved.`,
@@ -647,6 +690,7 @@ export async function evaluatePostSaveCardSuggestion(transactionId) {
   // Case 2: Repeated ad-hoc transaction (>= 1 prior match => >= 2 total entries)
   const matchingTransactions = await findMatchingHistoricalTransactions(
     prisma,
+    uid,
     sourceTx.nature,
     new Set([normalizeCardTitle(sourceTx.title)]),
     sourceTx

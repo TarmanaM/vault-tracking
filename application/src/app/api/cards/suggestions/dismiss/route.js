@@ -2,11 +2,15 @@
 // Mutes post-save Action Card suggestions for a specific (nature, title) key across devices
 
 import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth";
 import { dismissCardSuggestionKey } from "@/lib/cardPromotionService";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
     const { nature, title } = body || {};
@@ -15,7 +19,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: "Title is required" }, { status: 400 });
     }
 
-    const dismissedKeys = await dismissCardSuggestionKey(nature || "EXPENSE", title);
+    const dismissedKeys = await dismissCardSuggestionKey(user.id, nature || "EXPENSE", title);
     return NextResponse.json({ success: true, data: { dismissedKeys } });
   } catch (error) {
     console.error("Error in POST /api/cards/suggestions/dismiss:", error);

@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import {
   PromotionError,
   findMatchingActiveCard,
@@ -14,6 +15,9 @@ import { normalizeCardTitle } from "@/lib/cardPromotionUtils";
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const { searchParams } = new URL(request.url);
     const sourceTransactionId = parseInt(searchParams.get("sourceTransactionId") || "", 10);
@@ -21,8 +25,8 @@ export async function GET(request) {
       return NextResponse.json({ success: false, error: "Valid sourceTransactionId is required" }, { status: 400 });
     }
 
-    const sourceTx = await prisma.transaction.findUnique({
-      where: { id: sourceTransactionId },
+    const sourceTx = await prisma.transaction.findFirst({
+      where: { id: sourceTransactionId, userId: user.id },
       include: {
         category: true,
         party: true,
@@ -44,10 +48,11 @@ export async function GET(request) {
     const titleToCheck = searchParams.get("title") || sourceTx.title;
     const typeToCheck = searchParams.get("cardActionType") || sourceTx.nature;
 
-    const duplicateCard = await findMatchingActiveCard(prisma, titleToCheck, typeToCheck);
+    const duplicateCard = await findMatchingActiveCard(prisma, user.id, titleToCheck, typeToCheck);
     const matchTitles = new Set([normalizeCardTitle(sourceTx.title), normalizeCardTitle(titleToCheck)]);
     const matchingHistory = await findMatchingHistoricalTransactions(
       prisma,
+      user.id,
       sourceTx.nature,
       matchTitles,
       sourceTx
@@ -71,9 +76,12 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const body = await request.json();
-    const result = await promoteTransactionToCard(body);
+    const result = await promoteTransactionToCard({ ...body, userId: user.id });
     return NextResponse.json({ success: true, data: result });
   } catch (error) {
     if (error instanceof PromotionError) {

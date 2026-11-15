@@ -3,18 +3,22 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { toDecimal, roundMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request, { params }) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const { id } = await params;
     const partyId = parseInt(id, 10);
 
     const [party, partyTransactions, vaults, categories] = await Promise.all([
-      prisma.party.findUnique({
-        where: { id: partyId },
+      prisma.party.findFirst({
+        where: { id: partyId, userId: user.id },
         include: {
           debtLedgerEntries: {
             include: {
@@ -33,7 +37,7 @@ export async function GET(request, { params }) {
         },
       }),
       prisma.transaction.findMany({
-        where: { partyId },
+        where: { partyId, userId: user.id },
         include: {
           category: true,
           legs: { include: { vault: true } },
@@ -42,11 +46,11 @@ export async function GET(request, { params }) {
         orderBy: [{ transactionDate: "desc" }, { id: "desc" }],
       }),
       prisma.vault.findMany({
-        where: { isActive: true },
+        where: { userId: user.id, isActive: true },
         orderBy: { sortOrder: "asc" },
       }),
       prisma.category.findMany({
-        where: { isActive: true },
+        where: { userId: user.id, isActive: true },
         orderBy: { sortOrder: "asc" },
       }),
     ]);

@@ -3,6 +3,7 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import {
   getOrCreateAppSettings,
   getCachedRateMap,
@@ -13,18 +14,21 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(request) {
   try {
-    const syncResult = await syncFxRatesFromFrankfurter({ force: true });
+    const { user, errorResponse } = await requireUser(request);
+    if (errorResponse) return errorResponse;
 
-    const settings = await getOrCreateAppSettings();
+    const syncResult = await syncFxRatesFromFrankfurter({ userId: user.id, force: true });
+
+    const settings = await getOrCreateAppSettings(user.id);
     const [rates, rateMap, activeForeignCurrencies] = await Promise.all([
       prisma.exchangeRateCache.findMany({
         where: { quoteCurrency: settings.baseCurrency },
         orderBy: { baseCurrency: "asc" },
       }),
       getCachedRateMap(settings.baseCurrency),
-      getActiveForeignCurrencies(settings.baseCurrency),
+      getActiveForeignCurrencies(user.id, settings.baseCurrency),
     ]);
 
     return NextResponse.json({

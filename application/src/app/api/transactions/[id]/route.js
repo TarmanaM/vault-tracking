@@ -3,11 +3,15 @@
 
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { deleteAndReverseTransaction } from "@/lib/ledgerService";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request, { params }) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const { id } = await params;
     const txId = parseInt(id, 10);
@@ -15,8 +19,8 @@ export async function GET(request, { params }) {
       return NextResponse.json({ success: false, error: "Invalid transaction id" }, { status: 400 });
     }
 
-    const tx = await prisma.transaction.findUnique({
-      where: { id: txId },
+    const tx = await prisma.transaction.findFirst({
+      where: { id: txId, userId: user.id },
       include: {
         category: true,
         party: true,
@@ -46,9 +50,12 @@ export async function GET(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+  const { user, errorResponse } = await requireUser(request);
+  if (errorResponse) return errorResponse;
+
   try {
     const { id } = await params;
-    const result = await deleteAndReverseTransaction(id);
+    const result = await deleteAndReverseTransaction(id, user.id);
     return NextResponse.json({ success: true, data: result });
   } catch (error) {
     console.error("Error in DELETE /api/transactions/[id]:", error);

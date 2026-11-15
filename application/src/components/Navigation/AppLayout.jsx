@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Box,
   AppBar,
@@ -19,6 +19,7 @@ import {
   Paper,
   Stack,
   Chip,
+  CircularProgress,
   useMediaQuery,
   useTheme,
 } from "@mui/material";
@@ -28,6 +29,9 @@ import ShowChartIcon from "@mui/icons-material/ShowChart";
 import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
+import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
+import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
+import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import SyncAltIcon from "@mui/icons-material/SyncAlt";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
@@ -37,10 +41,10 @@ import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import CloseIcon from "@mui/icons-material/Close";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Tooltip } from "@mui/material";
 import { useLedgerStore } from "@/store/useLedgerStore";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import MoneyValue from "@/components/MoneyValue";
 import ToastProvider from "@/components/ToastProvider";
 import ReconcileModal from "@/components/ReconcileModal";
@@ -57,18 +61,25 @@ import FxSettingsModal from "@/components/FxSettingsModal";
 
 const DRAWER_WIDTH = 260;
 
-const navItems = [
+const baseNavItems = [
   { label: "Quick Actions", path: "/", icon: <FlashOnIcon /> },
   { label: "Wealth Journey", path: "/analytics", icon: <ShowChartIcon /> },
   { label: "Vaults & Checkpoint", path: "/checkpoints", icon: <AccountBalanceIcon /> },
   { label: "Ledger History", path: "/ledger", icon: <ReceiptLongIcon /> },
   { label: "Debt & PayLater", path: "/debts", icon: <PeopleAltOutlinedIcon /> },
+  { label: "Settings & Personalize", path: "/settings", icon: <SettingsOutlinedIcon /> },
 ];
 
 export default function AppLayout({ children }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const pathname = usePathname();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  const isPublicAuthRoute = pathname === "/login";
+  const isAuthFlowRoute =
+    pathname === "/login" || pathname === "/force-password-change" || pathname === "/onboarding";
 
   // Desktop sidebar collapse state
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -83,9 +94,69 @@ export default function AppLayout({ children }) {
   const isPrivacyHidden = useLedgerStore((s) => s.isPrivacyHidden);
   const togglePrivacyHidden = useLedgerStore((s) => s.togglePrivacyHidden);
 
+  const {
+    data: authData,
+    isLoading: authLoading,
+    isError: authError,
+  } = useQuery({
+    queryKey: ["auth-me"],
+    enabled: !isPublicAuthRoute,
+    retry: false,
+    staleTime: 10000,
+    queryFn: async () => {
+      const res = await fetch("/api/auth/me");
+      if (!res.ok) {
+        const err = new Error("Unauthorized");
+        err.status = res.status;
+        throw err;
+      }
+      const json = await res.json();
+      return json.data;
+    },
+  });
+
+  const authUser = authData?.user || null;
+
+  useEffect(() => {
+    if (isPublicAuthRoute || authLoading) return;
+
+    if (authError || !authUser) {
+      router.replace("/login");
+      return;
+    }
+
+    if (authUser.mustChangePassword) {
+      if (pathname !== "/force-password-change") {
+        router.replace("/force-password-change");
+      }
+      return;
+    }
+
+    if (pathname === "/force-password-change") {
+      router.replace(
+        authUser.onboardingCompleted || authUser.onboardingSkipped ? "/" : "/onboarding"
+      );
+      return;
+    }
+
+    if (!authUser.onboardingCompleted && !authUser.onboardingSkipped) {
+      if (pathname !== "/onboarding") {
+        router.replace("/onboarding");
+      }
+    }
+  }, [isPublicAuthRoute, authLoading, authError, authUser, pathname, router]);
+
+  const canLoadDashboard = Boolean(
+    authUser &&
+      !authUser.mustChangePassword &&
+      !isAuthFlowRoute &&
+      (authUser.onboardingCompleted || authUser.onboardingSkipped)
+  );
+
   // Fetch quick net wealth & app settings for top header badge and global modals
   const { data } = useQuery({
     queryKey: ["dashboard"],
+    enabled: canLoadDashboard,
     queryFn: async () => {
       const res = await fetch("/api/dashboard");
       const json = await res.json();
@@ -94,12 +165,58 @@ export default function AppLayout({ children }) {
     staleTime: 1000 * 60,
   });
 
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    await queryClient.clear();
+    router.replace("/login");
+  };
+
+  if (isAuthFlowRoute) {
+    if (
+      !isPublicAuthRoute &&
+      (authLoading ||
+        authError ||
+        !authUser ||
+        (authUser.mustChangePassword && pathname !== "/force-password-change") ||
+        (!authUser.mustChangePassword && pathname === "/force-password-change"))
+    ) {
+      return (
+        <Box sx={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    return (
+      <>
+        <ToastProvider />
+        {children}
+      </>
+    );
+  }
+
+  if (!canLoadDashboard) {
+    return (
+      <Box sx={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  const navItems =
+    authUser?.role === "ADMIN"
+      ? [
+          ...baseNavItems,
+          { label: "Admin Users", path: "/admin", icon: <AdminPanelSettingsOutlinedIcon /> },
+        ]
+      : baseNavItems;
+
   const netWealth = data?.summary?.netTotalWealth;
-  const baseCurrency = data?.appSettings?.baseCurrency || "IDR";
+  const baseCurrency = data?.appSettings?.baseCurrency || authData?.baseCurrency || "IDR";
 
   const drawerContent = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {/* Drawer Brand + Owner Profile (#2 kept cleanly above AppBar on mobile) */}
+      {/* Drawer Brand + Active Account Metadata */}
       <Box sx={{ p: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Box
@@ -123,7 +240,7 @@ export default function AppLayout({ children }) {
               Vault Tracking
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Isa Tarmana • Owner ({baseCurrency})
+              {authUser.fullName} • {authUser.role === "ADMIN" ? "Admin" : "Personal"} ({baseCurrency})
             </Typography>
           </Box>
         </Stack>
@@ -234,6 +351,19 @@ export default function AppLayout({ children }) {
             </ListItemIcon>
             <ListItemText primary="Export Journal" primaryTypographyProps={{ fontSize: "0.85rem", fontWeight: 600 }} />
           </ListItemButton>
+
+          <ListItemButton
+            onClick={() => {
+              if (isMobile) setMobileDrawerOpen(false);
+              handleLogout();
+            }}
+            sx={{ borderRadius: 2, bgcolor: "#FEF2F2", border: "1px solid #FECACA", color: "#B91C1C" }}
+          >
+            <ListItemIcon sx={{ minWidth: 32, color: "#DC2626" }}>
+              <LogoutOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary="Sign Out" primaryTypographyProps={{ fontSize: "0.85rem", fontWeight: 700 }} />
+          </ListItemButton>
         </Stack>
       </Box>
     </Box>
@@ -273,9 +403,9 @@ export default function AppLayout({ children }) {
 
           {/* Header Controls: Compact Format Toggle (#7), Privacy Eye (#8), Net Wealth Badge */}
           <Stack direction="row" spacing={0.75} alignItems="center">
-            <Tooltip title={isCompactNumbers ? "Compact mode (1jt / 59.5k). Tap for exact Rp" : "Exact Rupiah mode. Tap for compact"} arrow>
+            <Tooltip title={isCompactNumbers ? "Compact mode (1M / 59.5k). Tap for full precision" : "Full precision mode. Tap for compact"} arrow>
               <Chip
-                label={isCompactNumbers ? "1jt" : "Rp Full"}
+                label={isCompactNumbers ? "Compact" : "Exact"}
                 size="small"
                 clickable
                 onClick={toggleCompactNumbers}

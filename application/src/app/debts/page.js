@@ -178,18 +178,18 @@ export default function DebtsPage() {
         </Typography>
       </Popover>
 
-      {/* 3 Compact Summary KPI Cards (#11 horizontal strip on mobile & desktop) */}
+      {/* 2 Compact Summary KPI Cards */}
       <Grid container spacing={{ xs: 1, sm: 2 }} sx={{ mb: { xs: 2, sm: 2.5 } }}>
-        <Grid size={4}>
+        <Grid size={6}>
           <Card sx={{ borderLeft: "3px solid #2563EB", height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1, sm: 2 }, "&:last-child": { pb: { xs: 1, sm: 2 } } }}>
+            <CardContent sx={{ p: { xs: 1.25, sm: 2 }, "&:last-child": { pb: { xs: 1.25, sm: 2 } } }}>
               <Typography
                 variant="caption"
                 color="text.secondary"
                 noWrap
-                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.6rem", sm: "0.75rem" } }}
+                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.65rem", sm: "0.75rem" } }}
               >
-                PIUTANG
+                RECEIVABLES
               </Typography>
               <Typography
                 variant="h5"
@@ -197,7 +197,7 @@ export default function DebtsPage() {
                   fontWeight: 800,
                   color: "#2563EB",
                   mt: 0.25,
-                  fontSize: { xs: "0.86rem", sm: "1.35rem" },
+                  fontSize: { xs: "0.95rem", sm: "1.35rem" },
                 }}
               >
                 <MoneyValue value={summary.totalReceivables} allowTapToggle />
@@ -213,16 +213,16 @@ export default function DebtsPage() {
           </Card>
         </Grid>
 
-        <Grid size={4}>
+        <Grid size={6}>
           <Card sx={{ borderLeft: "3px solid #DC2626", height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1, sm: 2 }, "&:last-child": { pb: { xs: 1, sm: 2 } } }}>
+            <CardContent sx={{ p: { xs: 1.25, sm: 2 }, "&:last-child": { pb: { xs: 1.25, sm: 2 } } }}>
               <Typography
                 variant="caption"
                 color="text.secondary"
                 noWrap
-                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.6rem", sm: "0.75rem" } }}
+                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.65rem", sm: "0.75rem" } }}
               >
-                UTANG
+                PAYABLES
               </Typography>
               <Typography
                 variant="h5"
@@ -230,7 +230,7 @@ export default function DebtsPage() {
                   fontWeight: 800,
                   color: "#DC2626",
                   mt: 0.25,
-                  fontSize: { xs: "0.86rem", sm: "1.35rem" },
+                  fontSize: { xs: "0.95rem", sm: "1.35rem" },
                 }}
               >
                 <MoneyValue value={summary.totalPayables} allowTapToggle />
@@ -241,39 +241,6 @@ export default function DebtsPage() {
                 sx={{ display: { xs: "none", sm: "block" } }}
               >
                 What you owe to contacts &amp; lenders
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={4}>
-          <Card sx={{ borderLeft: "3px solid #7C3AED", height: "100%" }}>
-            <CardContent sx={{ p: { xs: 1, sm: 2 }, "&:last-child": { pb: { xs: 1, sm: 2 } } }}>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                noWrap
-                sx={{ fontWeight: 800, display: "block", fontSize: { xs: "0.6rem", sm: "0.75rem" } }}
-              >
-                HELD POOL
-              </Typography>
-              <Typography
-                variant="h5"
-                sx={{
-                  fontWeight: 800,
-                  color: "#7C3AED",
-                  mt: 0.25,
-                  fontSize: { xs: "0.86rem", sm: "1.35rem" },
-                }}
-              >
-                <MoneyValue value={summary.totalHeldFunds} allowTapToggle />
-              </Typography>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: { xs: "none", sm: "block" } }}
-              >
-                Designated held balances
               </Typography>
             </CardContent>
           </Card>

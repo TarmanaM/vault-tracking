@@ -8,6 +8,7 @@ import {
   parseCurrencyInput,
   numericToFormattedInput,
 } from "@/lib/money";
+import { getCurrencySymbol } from "@/lib/currencyHelpers";
 
 /**
  * Currency input field with live thousand separators (e.g. 1.000.000) and optional comma cents (,21)
@@ -15,6 +16,7 @@ import {
 export default function CurrencyTextField({
   value = "",
   onValueChange,
+  currency = "IDR",
   label = "Amount",
   placeholder = "0",
   size = "small",
@@ -83,7 +85,7 @@ export default function CurrencyTextField({
       InputProps={{
         startAdornment: (
           <InputAdornment position="start" sx={{ fontWeight: 700 }}>
-            Rp
+            {getCurrencySymbol(currency)}
           </InputAdornment>
         ),
         endAdornment:
