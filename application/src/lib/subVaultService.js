@@ -3,6 +3,7 @@
 import prisma from "./prisma.js";
 import { toDecimal, addMoney, subMoney, roundMoney, mulMoney } from "./money.js";
 import { getCurrencySymbol } from "./currencyHelpers.js";
+import { recalculateLedgerRunningBalances } from "./ledgerService.js";
 
 /**
  * Ensure any Vault with sub-containers has one mandatory Default Sub-Vault and migrated balances
@@ -291,7 +292,13 @@ export async function applySubVaultMutationInTx(
  */
 export async function syncVaultPartitions(
   vaultId,
-  { allocations = [], defaultSubContainerId = null, baseCurrency = "IDR", userId = null }
+  {
+    allocations = [],
+    defaultSubContainerId = null,
+    adjustMainVaultToMatch = false,
+    baseCurrency = "IDR",
+    userId = null,
+  }
 ) {
   const vId = parseInt(vaultId, 10);
   const uid = userId ? parseInt(userId, 10) : null;
@@ -381,6 +388,102 @@ export async function syncVaultPartitions(
           isSynced: true,
         },
       });
+    }
+
+    // Optional user-confirmed Main Vault adjustment when synced base pockets exceed Main Vault balance
+    if (adjustMainVaultToMatch && syncedBase.length > 0 && unsyncedBase.length !== 1) {
+      const syncedSum = syncedBase.reduce((acc, s) => addMoney(acc, s.balance), toDecimal(0));
+      const parentBal = roundMoney(vault.currentBalance);
+      if (syncedSum.greaterThan(parentBal)) {
+        const diffDec = roundMoney(subMoney(syncedSum, parentBal));
+        const now = new Date();
+        const monthTag = `${now.toLocaleString("en-US", { month: "short" })},${now.getFullYear()}`;
+        const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+        let selfParty = await tx.party.findFirst({
+          where: { userId: vault.userId, partyType: "SELF" },
+        });
+        if (!selfParty) {
+          selfParty = await tx.party.create({
+            data: {
+              userId: vault.userId,
+              code: "SELF",
+              name: "Me",
+              partyType: "SELF",
+              isActive: true,
+            },
+          });
+        }
+
+        const initCategory = await tx.category.findUnique({
+          where: { userId_code: { userId: vault.userId, code: "SYS_INITIAL_FUND" } },
+        });
+        const ensuredDefault = await ensureDefaultSubContainer(tx, vId);
+
+        const cp = await tx.vaultCheckpoint.create({
+          data: {
+            userId: vault.userId,
+            vaultId: vId,
+            checkpointTimestamp: now,
+            checkpointDate: now,
+            periodLabel: `Initial Pocket Sync - ${vault.name}`,
+            checkpointType: "INITIAL_FUND",
+            originalCountedAmount: syncedSum,
+            effectiveAnchorAmount: syncedSum,
+            systemBookBalanceBefore: parentBal,
+            rawDiscrepancyAmount: diffDec,
+            unexplainedDiscrepancyAmount: toDecimal(0),
+            notes: "Main vault adjusted to match separate base-currency pockets",
+          },
+        });
+
+        const initTx = await tx.transaction.create({
+          data: {
+            userId: vault.userId,
+            transactionDate: now,
+            transactionTime: timeStr,
+            monthTag,
+            title: `Initial Fund (Pocket Sync) - ${vault.name}`,
+            nature: "INITIAL_FUND",
+            categoryId: initCategory ? initCategory.id : null,
+            commitmentType: "NONE",
+            priorityTier: "NONE",
+            partyId: selfParty.id,
+            linkedCheckpointId: cp.id,
+            currency: baseUpper,
+            fxRateApplied: 1,
+            grossAmount: diffDec,
+            consumeAmount: toDecimal(0),
+            incomeAmount: toDecimal(0),
+            notes: "Auto-recorded from Sub-Vault Sync Split adjustment",
+          },
+        });
+
+        await tx.transactionLeg.create({
+          data: {
+            userId: vault.userId,
+            transactionId: initTx.id,
+            vaultId: vId,
+            subContainerId: ensuredDefault ? ensuredDefault.id : null,
+            legRole: "PRIMARY",
+            currency: baseUpper,
+            fxRateApplied: 1,
+            originalMutation: diffDec,
+            debitIn: diffDec,
+            creditOut: toDecimal(0),
+            netMutation: diffDec,
+            runningVaultBalance: syncedSum,
+            runningTotalWealth: syncedSum,
+          },
+        });
+
+        await tx.vault.update({
+          where: { id: vId },
+          data: { currentBalance: syncedSum },
+        });
+
+        await recalculateLedgerRunningBalances(tx, vault.userId);
+      }
     }
 
     await ensureDefaultSubContainer(tx, vId);

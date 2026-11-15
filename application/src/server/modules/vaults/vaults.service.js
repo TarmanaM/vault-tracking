@@ -380,12 +380,20 @@ export async function createSubVaultPocket(userId, rawVaultId, body = {}) {
 
     const hasExplicitBal =
       initialBalance !== null && initialBalance !== undefined && initialBalance !== "";
-    const initBalDec = hasExplicitBal ? roundMoney(initialBalance) : toDecimal(0);
     const isForeign = targetCurrency !== baseCurrency;
+    const vaultBaseBal = roundMoney(vault.currentBalance);
+    // Auto-carry existing main vault balance into the first base-currency pocket when no explicit split is provided
+    const shouldAutoCarryMain =
+      existingCount === 0 && !isForeign && !hasExplicitBal && !vaultBaseBal.isZero();
+    const initBalDec = hasExplicitBal
+      ? roundMoney(initialBalance)
+      : shouldAutoCarryMain
+      ? vaultBaseBal
+      : toDecimal(0);
     const resolvedSynced =
       isSynced !== null && isSynced !== undefined
         ? Boolean(isSynced)
-        : hasExplicitBal && (!isForeign || !initBalDec.isZero());
+        : shouldAutoCarryMain || (hasExplicitBal && (!isForeign || !initBalDec.isZero()));
 
     const maxSort = vault.subContainers.reduce((m, s) => Math.max(m, s.sortOrder || 0), 0);
 
@@ -432,6 +440,7 @@ export async function updateOrSyncSubVaults(userId, rawVaultId, body = {}) {
     const result = await syncVaultPartitions(vaultId, {
       allocations: body.allocations || [],
       defaultSubContainerId: body.defaultSubContainerId || null,
+      adjustMainVaultToMatch: Boolean(body.adjustMainVaultToMatch),
       baseCurrency,
       userId,
     });

@@ -168,13 +168,47 @@ export async function getActiveForeignCurrencies(userId, baseCurrency = "IDR", p
 }
 
 /**
- * Determine whether scheduled FX sync is currently overdue
+ * Persist a daily FX rate snapshot into global ExchangeRateHistory for wealth trajectory tracking.
  */
-export function isFxSyncDue(settings, hasAllActiveRates = true) {
+async function recordExchangeRateHistory({
+  baseCurrency,
+  quoteCurrency,
+  rateDate,
+  rate,
+  source = "FRANKFURTER_V2",
+}) {
+  if (!baseCurrency || !quoteCurrency || !rateDate) return;
+  await prisma.exchangeRateHistory.upsert({
+    where: {
+      baseCurrency_quoteCurrency_rateDate: {
+        baseCurrency,
+        quoteCurrency,
+        rateDate,
+      },
+    },
+    update: {
+      rate,
+      source,
+    },
+    create: {
+      baseCurrency,
+      quoteCurrency,
+      rateDate,
+      rate,
+      source,
+    },
+  });
+}
+
+/**
+ * Determine whether scheduled FX sync is currently overdue using global cache timestamps
+ */
+export function isFxSyncDue(settings, hasAllActiveRates = true, oldestGlobalFetchedAt = null) {
   if (!hasAllActiveRates) return true;
-  if (!settings?.lastFxSyncedAt) return true;
-  const intervalDays = Math.max(1, Number(settings.fxSyncIntervalDays || 3));
-  const elapsedMs = Date.now() - new Date(settings.lastFxSyncedAt).getTime();
+  const referenceTimestamp = oldestGlobalFetchedAt || settings?.lastFxSyncedAt;
+  if (!referenceTimestamp) return true;
+  const intervalDays = Math.max(1, Number(settings?.fxSyncIntervalDays || 3));
+  const elapsedMs = Date.now() - new Date(referenceTimestamp).getTime();
   return elapsedMs >= intervalDays * 24 * 60 * 60 * 1000;
 }
 
@@ -223,12 +257,22 @@ export async function syncFxRatesFromFrankfurter({ userId, force = false, curren
         quoteCurrency: baseCurrency,
         baseCurrency: { in: targets },
       },
-      select: { baseCurrency: true },
+      select: { baseCurrency: true, fetchedAt: true },
     });
-    const cachedCodes = new Set(existingCache.map((r) => r.baseCurrency));
-    const missingAny = targets.some((c) => !cachedCodes.has(c));
+    const cacheByCode = new Map(existingCache.map((r) => [r.baseCurrency, r.fetchedAt]));
+    const missingAny = targets.some((c) => !cacheByCode.has(c));
+    const oldestGlobalFetchedAt =
+      !missingAny && targets.length > 0
+        ? targets.reduce(
+            (oldest, code) => {
+              const t = cacheByCode.get(code);
+              return !oldest || (t && t < oldest) ? t : oldest;
+            },
+            null
+          )
+        : null;
 
-    if (!force && !isFxSyncDue(settings, !missingAny)) {
+    if (!force && !isFxSyncDue(settings, !missingAny, oldestGlobalFetchedAt)) {
       return {
         synced: false,
         skipped: true,
@@ -236,7 +280,7 @@ export async function syncFxRatesFromFrankfurter({ userId, force = false, curren
         updatedCount: 0,
         activeCurrencies: targets,
         baseCurrency,
-        lastFxSyncedAt: settings.lastFxSyncedAt,
+        lastFxSyncedAt: oldestGlobalFetchedAt || settings.lastFxSyncedAt,
         errors: [],
       };
     }
@@ -275,6 +319,13 @@ export async function syncFxRatesFromFrankfurter({ userId, force = false, curren
             source: "FRANKFURTER_V2",
             fetchedAt: new Date(),
           },
+        });
+        await recordExchangeRateHistory({
+          baseCurrency: item.baseCurrency,
+          quoteCurrency: item.quoteCurrency,
+          rateDate: item.rateDate,
+          rate: rateDec,
+          source: "FRANKFURTER_V2",
         });
         updatedRates.push(saved);
       } else {
@@ -341,12 +392,22 @@ export async function ensureFxRatesSyncedIfDue(userId) {
         quoteCurrency: baseCurrency,
         baseCurrency: { in: activeForeignCurrencies },
       },
-      select: { baseCurrency: true },
+      select: { baseCurrency: true, fetchedAt: true },
     });
-    const existingSet = new Set(existing.map((r) => r.baseCurrency));
-    const hasAllActiveRates = activeForeignCurrencies.every((code) => existingSet.has(code));
+    const existingByCode = new Map(existing.map((r) => [r.baseCurrency, r.fetchedAt]));
+    const hasAllActiveRates = activeForeignCurrencies.every((code) => existingByCode.has(code));
+    const oldestGlobalFetchedAt =
+      hasAllActiveRates && activeForeignCurrencies.length > 0
+        ? activeForeignCurrencies.reduce(
+            (oldest, code) => {
+              const t = existingByCode.get(code);
+              return !oldest || (t && t < oldest) ? t : oldest;
+            },
+            null
+          )
+        : null;
 
-    if (isFxSyncDue(settings, hasAllActiveRates)) {
+    if (isFxSyncDue(settings, hasAllActiveRates, oldestGlobalFetchedAt)) {
       return await syncFxRatesFromFrankfurter({ userId: uid, force: false });
     }
     return {
@@ -370,13 +431,14 @@ export async function upsertManualFxRate({ baseCurrency, quoteCurrency, rate }) 
   if (rateDec.lessThanOrEqualTo(0)) {
     throw new Error("FX rate must be greater than zero");
   }
-  return await prisma.exchangeRateCache.upsert({
+  const todayDate = new Date().toISOString().split("T")[0];
+  const saved = await prisma.exchangeRateCache.upsert({
     where: {
       baseCurrency_quoteCurrency: { baseCurrency: from, quoteCurrency: to },
     },
     update: {
       rate: rateDec,
-      rateDate: new Date().toISOString().split("T")[0],
+      rateDate: todayDate,
       source: "MANUAL",
       fetchedAt: new Date(),
     },
@@ -384,11 +446,19 @@ export async function upsertManualFxRate({ baseCurrency, quoteCurrency, rate }) 
       baseCurrency: from,
       quoteCurrency: to,
       rate: rateDec,
-      rateDate: new Date().toISOString().split("T")[0],
+      rateDate: todayDate,
       source: "MANUAL",
       fetchedAt: new Date(),
     },
   });
+  await recordExchangeRateHistory({
+    baseCurrency: from,
+    quoteCurrency: to,
+    rateDate: todayDate,
+    rate: rateDec,
+    source: "MANUAL",
+  });
+  return saved;
 }
 
 export function convertBaseToForeign(baseAmount, rate) {

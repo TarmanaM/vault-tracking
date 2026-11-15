@@ -477,6 +477,20 @@ model ExchangeRateCache {
   @@map("exchange_rate_cache")
 }
 
+model ExchangeRateHistory {
+  id            Int      @id @default(autoincrement())
+  baseCurrency  String   // Source/foreign currency ISO 4217 (e.g. USD)
+  quoteCurrency String   // Target/base currency ISO 4217 (e.g. IDR)
+  rateDate      String   // Observation date YYYY-MM-DD
+  rate          Decimal  // 1 baseCurrency = rate quoteCurrency
+  source        String   @default("FRANKFURTER_V2")
+  createdAt     DateTime @default(now())
+
+  @@unique([baseCurrency, quoteCurrency, rateDate])
+  @@index([quoteCurrency, rateDate])
+  @@map("exchange_rate_history")
+}
+
 // ==========================================
 // 15. USER MEDIA ASSETS (IN-DATABASE BYTEA STORAGE)
 // ==========================================
