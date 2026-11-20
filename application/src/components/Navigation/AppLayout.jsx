@@ -44,20 +44,21 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Tooltip } from "@mui/material";
 import { useLedgerStore } from "@/store/useLedgerStore";
+import { getCurrencySymbol } from "@/shared/currencyHelpers";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import MoneyValue from "@/components/MoneyValue";
-import ToastProvider from "@/components/ToastProvider";
-import ReconcileModal from "@/components/ReconcileModal";
-import ExportModal from "@/components/ExportModal";
-import AddPartyModal from "@/components/AddPartyModal";
-import ManageCardsModal from "@/components/ManageCardsModal";
-import PromoteToCardModal from "@/components/PromoteToCardModal";
-import CardSuggestionModal from "@/components/CardSuggestionModal";
-import CustomTransactionModal from "@/components/CustomTransactionModal";
-import AutoChartDrawer from "@/components/AutoChartDrawer";
-import VaultProfileModal from "@/components/VaultProfileModal";
-import SubVaultSyncModal from "@/components/SubVaultSyncModal";
-import FxSettingsModal from "@/components/FxSettingsModal";
+import MoneyValue from "@/components/common/MoneyValue";
+import ToastProvider from "@/components/common/ToastProvider";
+import ReconcileModal from "@/components/modals/ReconcileModal";
+import ExportModal from "@/components/modals/ExportModal";
+import AddPartyModal from "@/components/modals/AddPartyModal";
+import ManageCardsModal from "@/components/cards/ManageCardsModal";
+import PromoteToCardModal from "@/components/cards/PromoteToCardModal";
+import CardSuggestionModal from "@/components/cards/CardSuggestionModal";
+import CustomTransactionModal from "@/components/transactions/CustomTransactionModal";
+import AutoChartDrawer from "@/components/charts/AutoChartDrawer";
+import VaultProfileModal from "@/components/vaults/VaultProfileModal";
+import SubVaultSyncModal from "@/components/vaults/SubVaultSyncModal";
+import FxSettingsModal from "@/components/modals/FxSettingsModal";
 
 const DRAWER_WIDTH = 260;
 
@@ -93,6 +94,7 @@ export default function AppLayout({ children }) {
   const toggleCompactNumbers = useLedgerStore((s) => s.toggleCompactNumbers);
   const isPrivacyHidden = useLedgerStore((s) => s.isPrivacyHidden);
   const togglePrivacyHidden = useLedgerStore((s) => s.togglePrivacyHidden);
+  const setStoreBaseCurrency = useLedgerStore((s) => s.setBaseCurrency);
 
   const {
     data: authData,
@@ -165,6 +167,18 @@ export default function AppLayout({ children }) {
     staleTime: 1000 * 60,
   });
 
+  const resolvedBaseCurrency =
+    data?.appSettings?.baseCurrency ||
+    authData?.appSetting?.baseCurrency ||
+    authData?.baseCurrency ||
+    "IDR";
+
+  useEffect(() => {
+    if (resolvedBaseCurrency) {
+      setStoreBaseCurrency(resolvedBaseCurrency);
+    }
+  }, [resolvedBaseCurrency, setStoreBaseCurrency]);
+
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     await queryClient.clear();
@@ -212,7 +226,13 @@ export default function AppLayout({ children }) {
       : baseNavItems;
 
   const netWealth = data?.summary?.netTotalWealth;
-  const baseCurrency = data?.appSettings?.baseCurrency || authData?.baseCurrency || "IDR";
+  const baseCurrency = resolvedBaseCurrency;
+  const baseSymbol = getCurrencySymbol(baseCurrency).trim();
+  const compactChipLabel = isCompactNumbers
+    ? baseCurrency === "IDR"
+      ? "1jt"
+      : "1M"
+    : `${baseSymbol} Full`;
 
   const drawerContent = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -403,9 +423,9 @@ export default function AppLayout({ children }) {
 
           {/* Header Controls: Compact Format Toggle (#7), Privacy Eye (#8), Net Wealth Badge */}
           <Stack direction="row" spacing={0.75} alignItems="center">
-            <Tooltip title={isCompactNumbers ? "Compact mode (1M / 59.5k). Tap for full precision" : "Full precision mode. Tap for compact"} arrow>
+            <Tooltip title={isCompactNumbers ? "Compact mode. Tap for full precision" : "Full precision mode. Tap for compact"} arrow>
               <Chip
-                label={isCompactNumbers ? "Compact" : "Exact"}
+                label={compactChipLabel}
                 size="small"
                 clickable
                 onClick={toggleCompactNumbers}

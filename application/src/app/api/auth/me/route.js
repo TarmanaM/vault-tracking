@@ -1,10 +1,15 @@
 // API Route: GET /api/auth/me, PATCH /api/auth/me
 // Returns active authenticated user session & per-user app settings; updates own display name
 
+import { NextResponse } from "next/server";
 import prisma from "@/server/db/prisma";
 import { withApiHandler } from "@/server/http/apiHandler";
 import { BadRequestError } from "@/server/http/errors";
-import { SAFE_USER_SELECT } from "@/server/modules/auth/auth.service";
+import {
+  SAFE_USER_SELECT,
+  clearAuthCookie,
+  deleteOwnUserAccount,
+} from "@/server/modules/auth/auth.service";
 import { getOrCreateAppSettings } from "@/lib/fxService";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +17,7 @@ export const dynamic = "force-dynamic";
 export const GET = withApiHandler(
   async ({ user }) => {
     const appSetting = await getOrCreateAppSettings(user.id, prisma);
-    return { user, appSetting };
+    return { user, appSetting, baseCurrency: appSetting.baseCurrency };
   },
   { auth: "ALLOW_MUST_CHANGE_PASSWORD", errorStatus: 500 }
 );
@@ -40,4 +45,15 @@ export const PATCH = withApiHandler(async ({ request, user }) => {
   });
 
   return { user: updatedUser };
+});
+
+export const DELETE = withApiHandler(async ({ request, user }) => {
+  const body = await request.json().catch(() => ({}));
+  const result = await deleteOwnUserAccount(user.id, { password: body.password });
+  const res = NextResponse.json({
+    success: true,
+    data: result,
+  });
+  clearAuthCookie(res, request);
+  return res;
 });

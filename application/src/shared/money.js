@@ -80,9 +80,30 @@ export function formatCompactRupiah(val, withPrefix = true) {
   return `${isNeg ? "-" : ""}${prefix}${shortStr}`;
 }
 
-export function formatShortAxis(val, hidden = false) {
+export function formatShortAxis(val, hidden = false, currencyCode = "IDR") {
   if (hidden) return "•••";
-  return formatCompactRupiah(val, false);
+  const upper = String(currencyCode || "IDR").toUpperCase();
+  if (upper === "IDR") {
+    return formatCompactRupiah(val, false);
+  }
+
+  const dec = roundMoney(val);
+  const num = dec.toNumber();
+  const isNeg = num < 0;
+  const abs = Math.abs(num);
+
+  let shortStr = "";
+  if (abs >= 1_000_000_000) {
+    shortStr = `${trimTrailingZeroes((abs / 1_000_000_000).toFixed(2))}B`;
+  } else if (abs >= 1_000_000) {
+    shortStr = `${trimTrailingZeroes((abs / 1_000_000).toFixed(2))}M`;
+  } else if (abs >= 1_000) {
+    shortStr = `${trimTrailingZeroes((abs / 1_000).toFixed(1))}k`;
+  } else {
+    shortStr = trimTrailingZeroes(abs.toFixed(2));
+  }
+
+  return `${isNeg ? "-" : ""}${shortStr}`;
 }
 
 export function formatMoneyDisplay(val, { compact = false, includeCents = false, hidden = false } = {}) {

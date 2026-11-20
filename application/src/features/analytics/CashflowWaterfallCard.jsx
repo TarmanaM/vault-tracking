@@ -4,8 +4,10 @@ import React from "react";
 import { Card, CardContent, Box, Stack, Typography, Chip, IconButton } from "@mui/material";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import { BarChart } from "@mui/x-charts/BarChart";
-import { formatShortAxis, formatMoneyDisplay } from "@/shared/money";
-import { ChartCardHeaderMenu } from "@/components/ChartCardHeaderMenu";
+import { formatShortAxis } from "@/shared/money";
+import { formatNativeMoney, getCurrencySymbol } from "@/shared/currencyHelpers";
+import { useLedgerStore } from "@/store/useLedgerStore";
+import { ChartCardHeaderMenu } from "@/components/charts/ChartCardHeaderMenu";
 
 export default function CashflowWaterfallCard({
   waterfallData,
@@ -13,6 +15,9 @@ export default function CashflowWaterfallCard({
   isPrivacyHidden,
   openInfo,
 }) {
+  const baseCurrency = useLedgerStore((s) => s.baseCurrency) || "IDR";
+  const hiddenMask = `${getCurrencySymbol(baseCurrency)} ••••••`;
+  const fmtExact = (val) => formatNativeMoney(val, baseCurrency, { compact: false });
   return (
     <Card sx={{ mb: { xs: 2, sm: 2.5 } }}>
       <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
@@ -54,7 +59,7 @@ export default function CashflowWaterfallCard({
           {waterfallData.length > 0 ? (
             <BarChart
               xAxis={[{ scaleType: "band", data: waterfallData.map((d) => d.date.slice(5)) }]}
-              yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+              yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden, baseCurrency) }]}
               margin={{ top: 24, bottom: 28 }}
               slotProps={{ legend: { hidden: true } }}
               series={[
@@ -79,13 +84,13 @@ export default function CashflowWaterfallCard({
                   barLabel: (item) => {
                     if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
                     const row = waterfallData[item.dataIndex];
-                    return row ? `+${formatShortAxis(Math.abs(row.delta), false)}` : null;
+                    return row ? `+${formatShortAxis(Math.abs(row.delta), false, baseCurrency)}` : null;
                   },
                   valueFormatter: (v, ctx) => {
                     if (!v) return null;
                     const row = waterfallData[ctx.dataIndex];
-                    if (isPrivacyHidden) return "Rp ••••••";
-                    return `+${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
+                    if (isPrivacyHidden) return hiddenMask;
+                    return `+${fmtExact(row.delta)} (Run: ${fmtExact(row.runningSubtotal)})`;
                   },
                 },
                 {
@@ -97,13 +102,13 @@ export default function CashflowWaterfallCard({
                   barLabel: (item) => {
                     if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
                     const row = waterfallData[item.dataIndex];
-                    return row ? `+${formatShortAxis(Math.abs(row.delta), false)}` : null;
+                    return row ? `+${formatShortAxis(Math.abs(row.delta), false, baseCurrency)}` : null;
                   },
                   valueFormatter: (v, ctx) => {
                     if (!v) return null;
                     const row = waterfallData[ctx.dataIndex];
-                    if (isPrivacyHidden) return "Rp ••••••";
-                    return `+${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
+                    if (isPrivacyHidden) return hiddenMask;
+                    return `+${fmtExact(row.delta)} (Run: ${fmtExact(row.runningSubtotal)})`;
                   },
                 },
                 {
@@ -115,13 +120,13 @@ export default function CashflowWaterfallCard({
                   barLabel: (item) => {
                     if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
                     const row = waterfallData[item.dataIndex];
-                    return row ? formatShortAxis(row.delta, false) : null;
+                    return row ? formatShortAxis(row.delta, false, baseCurrency) : null;
                   },
                   valueFormatter: (v, ctx) => {
                     if (!v) return null;
                     const row = waterfallData[ctx.dataIndex];
-                    if (isPrivacyHidden) return "Rp ••••••";
-                    return `${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
+                    if (isPrivacyHidden) return hiddenMask;
+                    return `${fmtExact(row.delta)} (Run: ${fmtExact(row.runningSubtotal)})`;
                   },
                 },
                 {
@@ -133,13 +138,13 @@ export default function CashflowWaterfallCard({
                   barLabel: (item) => {
                     if (!showWaterfallLabels || isPrivacyHidden || !item.value) return null;
                     const row = waterfallData[item.dataIndex];
-                    return row ? formatShortAxis(row.delta, false) : null;
+                    return row ? formatShortAxis(row.delta, false, baseCurrency) : null;
                   },
                   valueFormatter: (v, ctx) => {
                     if (!v) return null;
                     const row = waterfallData[ctx.dataIndex];
-                    if (isPrivacyHidden) return "Rp ••••••";
-                    return `${formatMoneyDisplay(row.delta, { compact: false })} (Run: ${formatMoneyDisplay(row.runningSubtotal, { compact: false })})`;
+                    if (isPrivacyHidden) return hiddenMask;
+                    return `${fmtExact(row.delta)} (Run: ${fmtExact(row.runningSubtotal)})`;
                   },
                 },
               ]}

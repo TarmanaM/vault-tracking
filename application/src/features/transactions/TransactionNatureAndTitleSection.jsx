@@ -12,7 +12,7 @@ import {
 } from "@mui/material";
 import FlashOnIcon from "@mui/icons-material/FlashOn";
 import HistoryIcon from "@mui/icons-material/History";
-import MoneyValue from "@/components/MoneyValue";
+import MoneyValue from "@/components/common/MoneyValue";
 import { normalizeCardTitle } from "@/shared/cardPromotionUtils";
 
 export const PRIMARY_TYPE_PILLS = [

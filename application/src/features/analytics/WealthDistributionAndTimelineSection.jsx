@@ -23,11 +23,12 @@ import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import { PieChart } from "@mui/x-charts/PieChart";
 import { LineChart } from "@mui/x-charts/LineChart";
 import { formatShortAxis } from "@/shared/money";
-import MoneyValue from "@/components/MoneyValue";
+import { useLedgerStore } from "@/store/useLedgerStore";
+import MoneyValue from "@/components/common/MoneyValue";
 import {
   ChartCardHeaderMenu,
   ChartDotLabelMark,
-} from "@/components/ChartCardHeaderMenu";
+} from "@/components/charts/ChartCardHeaderMenu";
 
 export default function WealthDistributionAndTimelineSection({
   wealthDistributionPie,
@@ -40,6 +41,7 @@ export default function WealthDistributionAndTimelineSection({
   openChartDrawer,
   openInfo,
 }) {
+  const baseCurrency = useLedgerStore((s) => s.baseCurrency) || "IDR";
   return (
     <>
       <Grid container spacing={{ xs: 1.5, sm: 2.5 }} sx={{ mb: { xs: 2, sm: 3 } }}>
@@ -189,7 +191,7 @@ export default function WealthDistributionAndTimelineSection({
                 {wealthTimeline.length > 0 ? (
                   <LineChart
                     xAxis={[{ scaleType: "point", data: wealthTimeline.map((p) => p.date.slice(5)) }]}
-                    yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden) }]}
+                    yAxis={[{ valueFormatter: (v) => formatShortAxis(v, isPrivacyHidden, baseCurrency) }]}
                     margin={{ top: 24, right: 16, bottom: 24 }}
                     slots={{ mark: ChartDotLabelMark }}
                     slotProps={{

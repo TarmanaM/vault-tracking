@@ -1,6 +1,7 @@
 // Admin user provisioning, activation, and password reset service (Strictly metadata-scoped)
 import "server-only";
 import { hashPassword } from "@/server/modules/auth/auth.service";
+import { deleteUserAccountCascadeInTx } from "@/server/modules/auth/auth.repository";
 import {
   BadRequestError,
   ConflictError,
@@ -125,4 +126,28 @@ export async function updateManagedUserAccount({ adminUser, targetUserId, payloa
   }
 
   return await updateUserAccountById(targetId, updateData);
+}
+
+export async function deleteManagedUserAccount({ targetUserId, confirmUsername }) {
+  const targetId = parseInt(targetUserId, 10);
+  if (!targetId || Number.isNaN(targetId)) {
+    throw new BadRequestError("Invalid user ID");
+  }
+
+  const target = await findUserAccountById(targetId);
+  if (!target) {
+    throw new NotFoundError("User account not found");
+  }
+
+  const normalizedConfirm = String(confirmUsername || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+  if (!normalizedConfirm || normalizedConfirm !== target.username.toLowerCase()) {
+    throw new BadRequestError(
+      `Please type "${target.username}" accurately to confirm permanent account deletion.`
+    );
+  }
+
+  return await deleteUserAccountCascadeInTx(targetId);
 }

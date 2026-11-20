@@ -51,12 +51,26 @@ export async function updateUserFxSettingsPayload(userId, body = {}) {
 
   const baseChanged = nextBase !== current.baseCurrency;
 
-  await prisma.appSetting.update({
-    where: { userId },
-    data: {
-      baseCurrency: nextBase,
-      fxSyncIntervalDays: nextInterval,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.appSetting.update({
+      where: { userId },
+      data: {
+        baseCurrency: nextBase,
+        fxSyncIntervalDays: nextInterval,
+      },
+    });
+
+    if (baseChanged) {
+      await tx.vaultSubContainer.updateMany({
+        where: {
+          vault: { userId },
+          OR: [{ currency: current.baseCurrency }, { isDefault: true }],
+        },
+        data: {
+          currency: nextBase,
+        },
+      });
+    }
   });
 
   if (body.manualRate && body.manualRate.baseCurrency && body.manualRate.rate) {

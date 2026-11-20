@@ -4,6 +4,13 @@ import { create } from "zustand";
 let nextToastId = 1;
 
 export const useLedgerStore = create((set) => ({
+  // Active user's Base Currency (#2 Dynamic Base Currency across all UI components)
+  baseCurrency: "IDR",
+  setBaseCurrency: (currency) =>
+    set({
+      baseCurrency: String(currency || "IDR").trim().toUpperCase() || "IDR",
+    }),
+
   // Display preferences (#7 Compact numbers, #8 Privacy mode default unhide)
   isCompactNumbers: true,
   toggleCompactNumbers: () =>
@@ -169,9 +176,11 @@ export const useLedgerStore = create((set) => ({
       const hasQuickAction = Boolean(options.undoTransactionId || options.promoteTransaction);
       const newToast = {
         id,
+        title: options.title || null,
         message,
         severity: options.severity || "success", // success, info, warning, error
-        duration: options.duration ?? (hasQuickAction ? 5000 : 4000),
+        variant: options.variant || "default", // default | welcome
+        duration: options.duration ?? (options.variant === "welcome" ? 6500 : hasQuickAction ? 5000 : 4000),
         undoTransactionId: options.undoTransactionId || null,
         promoteTransaction: options.promoteTransaction || null,
       };

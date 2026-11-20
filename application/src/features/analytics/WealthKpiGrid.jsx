@@ -4,7 +4,7 @@ import React from "react";
 import { Grid, Card, CardContent, Typography, Chip, Stack } from "@mui/material";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
-import MoneyValue from "@/components/MoneyValue";
+import MoneyValue from "@/components/common/MoneyValue";
 
 export default function WealthKpiGrid({ analytics, wealthComparison }) {
   const isUp = wealthComparison?.direction === "UP";

@@ -4,9 +4,9 @@ import React from "react";
 import { Box, Stack, Typography, Chip, Alert } from "@mui/material";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import VaultAvatar from "@/components/VaultAvatar";
-import MoneyValue from "@/components/MoneyValue";
-import CurrencyTextField from "@/components/CurrencyTextField";
+import VaultAvatar from "@/components/vaults/VaultAvatar";
+import MoneyValue from "@/components/common/MoneyValue";
+import CurrencyTextField from "@/components/common/CurrencyTextField";
 
 export default function TransactionVaultAndTransferSection({
   needsVaultSelection,

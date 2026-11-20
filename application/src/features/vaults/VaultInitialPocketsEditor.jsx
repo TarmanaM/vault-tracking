@@ -15,7 +15,7 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
-import CurrencyTextField from "@/components/CurrencyTextField";
+import CurrencyTextField from "@/components/common/CurrencyTextField";
 import { SUPPORTED_CURRENCIES } from "@/shared/currencyHelpers";
 
 export default function VaultInitialPocketsEditor({

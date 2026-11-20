@@ -12,11 +12,16 @@ import {
   Button,
   Alert,
   TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 import AutoAwesomeOutlinedIcon from "@mui/icons-material/AutoAwesomeOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
+import DeleteForeverOutlinedIcon from "@mui/icons-material/DeleteForeverOutlined";
 import Link from "next/link";
 
 export default function AccountSecurityCard({
@@ -24,6 +29,14 @@ export default function AccountSecurityCard({
   baseCurrency,
   openFxSettingsDialog,
   handleLogout,
+  deleteDialogOpen,
+  setDeleteDialogOpen,
+  deletePassword,
+  setDeletePassword,
+  deleteError,
+  setDeleteError,
+  deletingAccount,
+  handleDeleteOwnAccount,
   passwordError,
   handlePasswordChange,
   currentPassword,
@@ -95,6 +108,27 @@ export default function AccountSecurityCard({
                 >
                   Sign Out
                 </Button>
+
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteForeverOutlinedIcon />}
+                  onClick={() => {
+                    setDeleteError("");
+                    setDeletePassword("");
+                    setDeleteDialogOpen(true);
+                  }}
+                  sx={{
+                    justifyContent: "flex-start",
+                    textTransform: "none",
+                    fontWeight: 700,
+                    borderRadius: 2,
+                    bgcolor: "#FEF2F2",
+                    borderColor: "#FCA5A5",
+                  }}
+                >
+                  Delete My Account Permanently
+                </Button>
               </Stack>
             </Stack>
           </CardContent>
@@ -165,6 +199,58 @@ export default function AccountSecurityCard({
           </CardContent>
         </Card>
       </Grid>
+
+      <Dialog
+        open={Boolean(deleteDialogOpen)}
+        onClose={() => !deletingAccount && setDeleteDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800, color: "#DC2626" }}>
+          Delete Account Permanently?
+        </DialogTitle>
+        <Box component="form" onSubmit={handleDeleteOwnAccount}>
+          <DialogContent dividers>
+            <Stack spacing={2}>
+              {deleteError && <Alert severity="error">{deleteError}</Alert>}
+              <Alert severity="error" sx={{ fontSize: "0.82rem" }}>
+                This action is <strong>permanent and irreversible</strong>. All of your vaults,
+                pockets, transactions, action cards, categories, debts, and media avatars will be
+                permanently erased.
+              </Alert>
+              <TextField
+                label="Enter Current Password to Confirm"
+                type="password"
+                size="small"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                fullWidth
+                required
+                disabled={deletingAccount}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button
+              onClick={() => setDeleteDialogOpen(false)}
+              color="inherit"
+              disabled={deletingAccount}
+              sx={{ textTransform: "none" }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              color="error"
+              disabled={deletingAccount || !deletePassword}
+              sx={{ textTransform: "none", fontWeight: 700 }}
+            >
+              {deletingAccount ? "Deleting..." : "Delete My Account"}
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
     </Grid>
   );
 }

@@ -10,6 +10,8 @@ import {
   findUserWithHashByUsername,
   findUserWithHashById,
   updateUserPasswordById,
+  recordUserLoginTimestamp,
+  deleteUserAccountCascadeInTx,
 } from "./auth.repository.js";
 import {
   BadRequestError,
@@ -206,6 +208,8 @@ export async function authenticateUserCredentials({ username, password }) {
     throw new UnauthorizedError("Invalid username or password.", "INVALID_CREDENTIALS");
   }
 
+  const previousLoginAt = user.lastLoginAt || null;
+  const nowLoginAt = await recordUserLoginTimestamp(user.id);
   const token = signAuthToken(user);
   return {
     token,
@@ -218,6 +222,8 @@ export async function authenticateUserCredentials({ username, password }) {
       mustChangePassword: user.mustChangePassword,
       onboardingCompleted: user.onboardingCompleted,
       onboardingSkipped: user.onboardingSkipped,
+      lastLoginAt: nowLoginAt,
+      previousLoginAt,
     },
   };
 }
@@ -242,4 +248,22 @@ export async function changeUserPassword(userId, { currentPassword, newPassword 
   const token = signAuthToken(updatedUser);
 
   return { user: updatedUser, token };
+}
+
+export async function deleteOwnUserAccount(userId, { password }) {
+  if (!password) {
+    throw new BadRequestError("Current password is required to delete your account.");
+  }
+
+  const fullUser = await findUserWithHashById(userId);
+  if (!fullUser) {
+    throw new UnauthorizedError("User not found.", "USER_NOT_FOUND");
+  }
+
+  const matches = await verifyPassword(password, fullUser.passwordHash);
+  if (!matches) {
+    throw new BadRequestError("Incorrect password. Account deletion cancelled.");
+  }
+
+  return await deleteUserAccountCascadeInTx(userId);
 }

@@ -24,7 +24,7 @@ import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { TimePicker } from "@mui/x-date-pickers/TimePicker";
 import dayjs from "dayjs";
-import CurrencyTextField from "@/components/CurrencyTextField";
+import CurrencyTextField from "@/components/common/CurrencyTextField";
 import { formatNativeMoney } from "@/shared/currencyHelpers";
 
 export default function TransactionDebtAndOptionsSection({

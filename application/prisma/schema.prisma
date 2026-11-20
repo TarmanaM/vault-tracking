@@ -22,11 +22,12 @@ model User {
   role                  String   @default("USER") // USER, ADMIN
   isActive              Boolean  @default(true)
   mustChangePassword    Boolean  @default(false)
-  onboardingCompleted   Boolean  @default(false)
-  onboardingSkipped     Boolean  @default(false)
-  onboardingProfileJson String?  // JSON snapshot of user interview & personalization choices
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  onboardingCompleted   Boolean   @default(false)
+  onboardingSkipped     Boolean   @default(false)
+  onboardingProfileJson String?   // JSON snapshot of user interview & personalization choices
+  lastLoginAt           DateTime? // Nullable timestamp of the user's most recent sign-in
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   // User-owned domain relations
   vaults             Vault[]

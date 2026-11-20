@@ -13,7 +13,7 @@ import {
   Slider,
 } from "@mui/material";
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
-import VaultAvatar, { VAULT_ICON_OPTIONS } from "@/components/VaultAvatar";
+import VaultAvatar, { VAULT_ICON_OPTIONS } from "@/components/vaults/VaultAvatar";
 
 export const COLOR_SWATCHES = [
   "#2563EB",

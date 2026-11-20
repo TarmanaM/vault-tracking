@@ -28,6 +28,12 @@
   - `src/server/modules/<domain>/`: Domain services (`*.service.js`) and repositories (`*.repository.js`)
 - `src/shared/`: Pure client-and-server safe helpers (`money.js`, `currencyHelpers.js`, `spendingLayers.js`, `vaultHelpers.js`, `cardPromotionUtils.js`) and `zod` schemas (`src/shared/schemas/index.js`)
 - `src/features/<domain>/`: Modular client feature sections (`vaults`, `transactions`, `analytics`, `settings`)
+- `src/components/`: Categorized UI components (`common/`, `cards/`, `vaults/`, `transactions/`, `modals/`, `charts/`, `dashboard/`, `Navigation/`)
+- `src/app/**`: Colocated Next.js App Router pages following [`.agents/CodingContext.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/CodingContext.md):
+  - `page.js` / `page.jsx`: Server Component entry point (NO `"use client"` on `page.js`).
+  - `[Feature]UI.jsx`: Purely visual Client Component (`"use client"`).
+  - `use[Feature]Logic.js`: Custom hook encapsulating all `useState`, `useEffect`, React Query queries/mutations, and client calculations.
+  - `[feature].actions.js`: Optional async mutation / server action helpers when applicable.
 - `src/app/api/**/route.js`: Thin HTTP route handlers (`<= 50` lines) using `withApiHandler`
 
 # Context & Checkpoint Directory (Modular LLM Context)
@@ -37,6 +43,7 @@ Agar konteks LLM selalu akurat dan hemat token, baca file spesifik berikut sesua
 - [`./.agents/ListFeature.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/ListFeature.md): Checkpoint status fitur utama (Data Schema, Action Cards, Habit Recommendation Engine, Vault Reconciliation & Coin Audit, Debt/PayLater Sub-Ledger, Interactive Charts, Accounting Export, Multi-User v2.0, Going Public v2.1).
 - [`./.agents/DataSchema.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/DataSchema.md): Blueprint 17 tabel database relasional PostgreSQL (`MediaAsset` termasuk), Simplified Taxonomy Layer, dan pemetaan Chart of Accounts (COA `1xxx`–`6xxx`).
 - [`./.agents/BusinessLogic.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/BusinessLogic.md): Aturan logika matematika buku besar, rumus skor rekomendasi in-house, rekonsiliasi Dana Awal & transaksi susulan (backdated), konversi Cash-Koin, Auto-Split Pajak/Admin, alur PayLater, serta Write-Off Piutang.
+- [`./.agents/CodingContext.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/CodingContext.md): Standar arsitektur modular Next.js (pemisahan ketat `page.js` Server Component, `[Feature]UI.jsx`, `use[Feature]Logic.js`, `[feature].actions.js`, anti-monolith, dan lazy `"use client"`).
 - [`./.agents/journal/`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/.agents/journal/): Tempat diskusi perbaikan bug, keputusan arsitektur (`001` s/d `014-backlog-05-going-public-decisions.md`), dan rencana pengembangan.
 - [`./docs/`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/docs/): Dokumentasi publik berbahasa Inggris (`DEPLOY-VERCEL.md`, `DEPLOY-DOCKER.md`, `ARCHITECTURE.md`) serta [`./README.md`](file:///d:/Isa%20Tarmana/software/learning-code/vault-tracking/README.md).
 
@@ -55,6 +62,11 @@ Agar konteks LLM selalu akurat dan hemat token, baca file spesifik berikut sesua
     - **System UI (English)**: Semua label tombol, menu navigasi, header tabel sistem, status badge, dan fitur aplikasi wajib menggunakan **Bahasa Inggris** (contoh: _Save, Quick Actions, Reconcile Vault, Mandatory Expense, Discretionary, Export Journal_).
     - **User-Defined Data (Original Language)**: Nama data milik user seperti nama Action Card (_"Parkir Kantor"_, _"Beli Bensin Skupi"_), nama Penyimpanan (_"BANK NOBU"_, _"CASH"_, _"COIN"_), dan nama Peran (_"Isa"_, _"Ibrahim (Dada)"_, _"Fernando"_) tetap mempertahankan nama asli sehari-hari user.
 11. **Clean UI with `(i)` Info Button**: Jika ada penjelasan fitur, rumus perhitungan, atau keterangan layer keuangan, wajib bungkus di dalam tombol ikon **`(i)`** (Tooltip / Popover / Modal) sebagai tempat menampilkan penjelasan fitur tersebut sehingga tampilan utama tetap bersih dan tidak penuh teks.
+12. **Testing UI with Browser**: jangan uji jika tidak disuruh
+13. **Testing build** : jangan uji jika tidak disuruh. cukup test eslint saja
+14. **Next.js Modular Page & Component Architecture (`.agents/CodingContext.md`)**:
+    - **No Monoliths & Strict Separation of Concerns**: Pisahkan state/effect/fetching logic (`use[Feature]Logic.js`) dari tampilan visual (`[Feature]UI.jsx`). Hindari menulis satu file monolitik besar yang mencampur semua logika dan JSX.
+    - **Server `page.js` Entrypoint (Lazy `"use client"`)**: File `page.js` / `page.jsx` di `src/app/` wajib tetap menjadi **Server Component** (jangan taruh `"use client"` di `page.js`). Dorong `"use client"` ke komponen daun / `[Feature]UI.jsx` yang dikolokasikan di folder rute tersebut.
 
 # Financial & Ledger Integrity Rules (Mandatory for Agent)
 
