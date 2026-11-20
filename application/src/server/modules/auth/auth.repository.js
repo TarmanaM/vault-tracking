@@ -1,6 +1,7 @@
 // Prisma repository for User authentication, session queries, and atomic account deletion
 import "server-only";
 import prisma from "@/server/db/prisma";
+import logger from "@/server/logger";
 import { BadRequestError, NotFoundError } from "@/server/http/errors";
 
 export const BASE_SAFE_USER_SELECT = {
@@ -56,8 +57,11 @@ export async function recordUserLoginTimestamp(userId) {
       where: { id: Number(userId) },
       data: { lastLoginAt: now },
     });
-  } catch {
-    // Non-fatal fallback if lastLoginAt migration has not been applied yet
+  } catch (err) {
+    logger.warn("Failed to record user lastLoginAt", {
+      userId: Number(userId),
+      error: err?.message || "Unknown error",
+    });
   }
   return now;
 }
